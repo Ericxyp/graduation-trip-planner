@@ -1,5 +1,32 @@
-import { BUDGET_OPTIONS, MEMBERS } from './data'
-import type { CostItem, MemberId, MyPrefs, Scheme } from './types'
+import { BUDGET_OPTIONS, MEMBERS, SCHEMES } from './data'
+import type { CostItem, MemberId, MyPrefs, Scheme, SchemeId } from './types'
+
+/**
+ * 匹配度权重（总和 100）。computeStats 与界面中的“如何计算”说明共用此常量，
+ * 修改权重时两处会同步变化。
+ */
+export const MATCH_WEIGHTS = {
+  dates: 40,
+  budget: 20,
+  destination: 20,
+  pace: 10,
+  stay: 10,
+} as const
+
+export type MatchDimension = keyof typeof MATCH_WEIGHTS
+
+export const MATCH_DIMENSIONS: { key: MatchDimension; label: string; rule: string }[] = [
+  { key: 'dates', label: '日期匹配', rule: '可出发日期完整覆盖方案日期得满分，否则为 0' },
+  { key: 'budget', label: '预算匹配', rule: '预算上限不低于方案人均得满分，否则为 0' },
+  { key: 'destination', label: '目的地偏好', rule: '按志愿顺序递减：第一志愿 100%、第二 70%、第三 40%' },
+  { key: 'pace', label: '旅行节奏', rule: '节奏一致得满分；一方为“适中”得 60%；特种兵与度假相反为 0' },
+  { key: 'stay', label: '住宿要求', rule: '方案住宿类型满足你的要求得满分，否则为 0' },
+]
+
+/** 目的地志愿顺序对应的得分比例 */
+export const DEST_RANK_RATIO: Record<number, number> = { 1: 1, 2: 0.7, 3: 0.4 }
+/** 节奏相邻（任一方为“适中”）时的得分比例 */
+export const PACE_ADJACENT_RATIO = 0.6
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -57,6 +84,7 @@ export interface MyFit {
   pace: boolean
   stay: boolean
   score: number
+  parts: Record<MatchDimension, number>
 }
 
 export interface SchemeStats {
@@ -103,10 +131,16 @@ export function computeStats(s: Scheme, prefs: MyPrefs | null): SchemeStats {
     const destRank = rankIdx === -1 ? 0 : rankIdx + 1
     const pace = prefs.pace === s.pace
     const stay = s.stayOk.includes(prefs.stay)
-    const destScore = destRank === 1 ? 20 : destRank === 2 ? 14 : destRank === 3 ? 8 : 0
-    const paceScore = pace ? 10 : prefs.pace === 'balanced' || s.pace === 'balanced' ? 6 : 0
-    const score = (dates ? 40 : 0) + (budget ? 20 : 0) + destScore + paceScore + (stay ? 10 : 0)
-    myFit = { dates, budget, destRank, pace, stay, score }
+    const W = MATCH_WEIGHTS
+    const parts: Record<MatchDimension, number> = {
+      dates: dates ? W.dates : 0,
+      budget: budget ? W.budget : 0,
+      destination: Math.round(W.destination * (DEST_RANK_RATIO[destRank] ?? 0)),
+      pace: pace ? W.pace : prefs.pace === 'balanced' || s.pace === 'balanced' ? Math.round(W.pace * PACE_ADJACENT_RATIO) : 0,
+      stay: stay ? W.stay : 0,
+    }
+    const score = parts.dates + parts.budget + parts.destination + parts.pace + parts.stay
+    myFit = { dates, budget, destRank, pace, stay, score, parts }
     if (budget) budgetFitCount += 1
     if (dates && !stay) stayMissCount += 1
     if (destRank === 1) topChoiceCount += 1
@@ -147,4 +181,71 @@ function explain(s: Scheme, st: SchemeStats) {
 
 export function filledMembers(prefs: MyPrefs | null) {
   return MEMBERS.filter((m) => !m.isMe || prefs).length
+}
+
+/* ---------- 推荐与变化对比 ---------- */
+
+export function computeAll(prefs: MyPrefs | null): Record<SchemeId, SchemeStats> {
+  const out = {} as Record<SchemeId, SchemeStats>
+  SCHEMES.forEach((s) => (out[s.id] = computeStats(s, prefs)))
+  return out
+}
+
+/** 最佳方案：匹配度优先，其次参与人数多，再次人均更低 */
+export function pickBest(stats: Record<SchemeId, SchemeStats>): SchemeId {
+  return SCHEMES.map((s) => s.id).sort(
+    (a, b) => stats[b].match - stats[a].match || stats[b].count - stats[a].count || stats[a].perPerson - stats[b].perPerson,
+  )[0]
+}
+
+export interface RecommendationDelta {
+  beforeSchemeId: SchemeId
+  afterSchemeId: SchemeId
+  beforeMatch: number
+  afterMatch: number
+  beforeCount: number
+  afterCount: number
+  beforePerPerson: number
+  afterPerPerson: number
+  lockedSchemeId: SchemeId | null
+  isUpdate: boolean
+  summary: string
+  /** 三套方案匹配度前后对比 */
+  rows: { id: SchemeId; before: number; after: number }[]
+}
+
+export function buildDelta(prevPrefs: MyPrefs | null, nextPrefs: MyPrefs, locked: SchemeId | null): RecommendationDelta {
+  const before = computeAll(prevPrefs)
+  const after = computeAll(nextPrefs)
+  const beforeId = pickBest(before)
+  const afterId = pickBest(after)
+  const scheme = SCHEMES.find((s) => s.id === afterId)!
+  const prevScheme = SCHEMES.find((s) => s.id === beforeId)!
+  const a = after[afterId]
+  const b = before[afterId]
+  const fit = a.myFit!
+
+  const endDay = rangeDays(scheme.start, scheme.end).length
+  const range = `${fmtMD(scheme.start)}—${parseDate(scheme.end).getDate()}日`
+  const dateClause = fit.dates ? `你的日期完整覆盖${range}` : `你的日期没有完整覆盖${range}（共${endDay}天），暂未计入参加人数`
+  const budgetClause = fit.budget ? `预算也符合${scheme.city}方案` : `人均${yuan(a.perPerson)}略高于你的预算上限`
+  const conclusion =
+    beforeId === afterId
+      ? `因此${scheme.city}仍是全员共识最强的选择。`
+      : `综合匹配度${a.match}%超过了${prevScheme.city}，因此最佳方案变为${scheme.city}。`
+
+  return {
+    beforeSchemeId: beforeId,
+    afterSchemeId: afterId,
+    beforeMatch: b.match,
+    afterMatch: a.match,
+    beforeCount: b.count,
+    afterCount: a.count,
+    beforePerPerson: b.perPerson,
+    afterPerPerson: a.perPerson,
+    lockedSchemeId: locked,
+    isUpdate: !!prevPrefs,
+    summary: `因为${dateClause}，${budgetClause}，${conclusion}`,
+    rows: SCHEMES.map((s) => ({ id: s.id, before: before[s.id].match, after: after[s.id].match })),
+  }
 }

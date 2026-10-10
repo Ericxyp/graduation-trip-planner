@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, Check, Plus, ShieldCheck, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Plus, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { BUDGET_OPTIONS, DATE_OPTIONS, DEST_OPTIONS, MUST_OPTIONS, NO_OPTIONS, PACE_OPTIONS, STAY_OPTIONS } from '../data'
 import { parseDate, weekday } from '../logic'
 import type { DestId, MyPrefs, Pace, StayPref } from '../types'
@@ -7,6 +7,9 @@ import type { DestId, MyPrefs, Pace, StayPref } from '../types'
 interface Props {
   open: boolean
   initial: MyPrefs | null
+  /** 演示预填：仅在用户主动点击“填写推荐偏好”时传入；已保存的真实偏好优先 */
+  preset?: Partial<MyPrefs> | null
+  onPresetConsumed?: () => void
   onClose: () => void
   onSubmit: (p: MyPrefs) => void
 }
@@ -23,27 +26,42 @@ interface Draft {
 
 const empty = (): Draft => ({ dates: [], budget: '', destinations: [], pace: 'balanced', stay: 'any', musts: [], nos: [] })
 
-export default function PreferenceSheet({ open, initial, onClose, onSubmit }: Props) {
+export default function PreferenceSheet({ open, initial, preset, onPresetConsumed, onClose, onSubmit }: Props) {
   const [d, setD] = useState<Draft>(empty)
   const [touched, setTouched] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
+  const [usedPreset, setUsedPreset] = useState(false)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const consumedRef = useRef(onPresetConsumed)
+  consumedRef.current = onPresetConsumed
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // 打开时初始化草稿：真实保存的偏好 > 演示预填 > 空白。草稿只在内存中，提交前不写入 localStorage。
+  useEffect(() => {
+    if (!open) return
+    const applyPreset = !initial && !!preset
+    setD(initial ? { ...initial } : applyPreset ? { ...empty(), ...preset } : empty())
+    setUsedPreset(applyPreset)
+    setTouched(false)
+    if (preset) consumedRef.current?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initial])
 
   useEffect(() => {
     if (!open) return
-    setD(initial ? { ...initial } : empty())
-    setTouched(false)
-    setSubmitting(false)
+    const prevFocus = document.activeElement as HTMLElement | null
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current()
     window.addEventListener('keydown', onKey)
+    const t = window.setTimeout(() => panelRef.current?.focus({ preventScroll: true }), 30)
     return () => {
+      window.clearTimeout(t)
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
+      prevFocus?.focus?.({ preventScroll: true })
     }
-  }, [open, initial])
+  }, [open])
 
   if (!open) return null
 
@@ -76,16 +94,17 @@ export default function PreferenceSheet({ open, initial, onClose, onSubmit }: Pr
       document.querySelector('[data-error="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
-    setSubmitting(true)
-    window.setTimeout(() => {
-      onSubmit({ ...d, dates: [...d.dates].sort(), submittedAt: new Date().toISOString() })
-    }, 650)
+    onSubmit({ ...d, dates: [...d.dates].sort(), submittedAt: new Date().toISOString() })
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-stretch sm:justify-end" role="dialog" aria-modal="true" aria-labelledby="pref-title">
       <div className="absolute inset-0 animate-fade-in bg-ink-900/45 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative flex max-h-[92vh] w-full animate-sheet-in flex-col overflow-hidden rounded-t-[28px] bg-cream-50 shadow-lift sm:max-h-none sm:max-w-[520px] sm:animate-panel-in sm:rounded-none sm:rounded-l-[28px]">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative flex max-h-[92dvh] w-full animate-sheet-in flex-col overflow-hidden rounded-t-[28px] bg-cream-50 shadow-lift outline-none sm:max-h-none sm:max-w-[520px] sm:animate-panel-in sm:rounded-none sm:rounded-l-[28px]"
+      >
         <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-ink-800/15 sm:hidden" />
         <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-4 sm:px-7 sm:pt-6">
           <div>
@@ -99,6 +118,12 @@ export default function PreferenceSheet({ open, initial, onClose, onSubmit }: Pr
           </button>
         </div>
 
+        {usedPreset && (
+          <div className="mx-5 mb-2 flex items-start gap-2.5 rounded-2xl bg-coral-50 px-4 py-3 ring-1 ring-coral-200 sm:mx-7" role="status">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-coral-600" />
+            <p className="text-[13px] leading-5 text-coral-700">已预填一组推荐偏好，可随意修改，确认后点击“提交偏好”。关闭表单不会保存。</p>
+          </div>
+        )}
         <div className="mx-5 flex items-start gap-2.5 rounded-2xl bg-sky-50 px-4 py-3 ring-1 ring-sky-100 sm:mx-7">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
           <p className="text-[13px] leading-5 text-sky-800">预算和敏感条件仅用于系统匹配，默认不向其他成员公开。</p>
@@ -230,18 +255,9 @@ export default function PreferenceSheet({ open, initial, onClose, onSubmit }: Pr
 
         <div className="border-t border-ink-800/5 bg-white px-5 pb-[max(16px,env(safe-area-inset-bottom))] pt-3 sm:px-7 sm:pb-5">
           {touched && hasError && <p className="mb-2 text-center text-xs font-medium text-coral-600">还有 {missing} 项必填内容未完成</p>}
-          <button onClick={submit} disabled={submitting} className="btn-primary w-full py-3.5 text-[15px]">
-            {submitting ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                正在重新计算共识…
-              </>
-            ) : (
-              <>
-                <Check className="h-4 w-4" />
-                {initial ? '保存修改' : '提交偏好'}
-              </>
-            )}
+          <button onClick={submit} className="btn-primary w-full py-3.5 text-[15px]">
+            <Check className="h-4 w-4" />
+            {initial ? '保存修改' : '提交偏好'}
           </button>
         </div>
       </div>

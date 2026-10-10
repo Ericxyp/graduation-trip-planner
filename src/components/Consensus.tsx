@@ -1,5 +1,8 @@
 import {
   AlertTriangle,
+  Calculator,
+  ChevronDown,
+  Info,
   ArrowRight,
   BadgeCheck,
   CalendarDays,
@@ -15,7 +18,8 @@ import {
   X,
 } from 'lucide-react'
 import { MEMBERS, PACE_LABEL, SCHEMES, schemeById } from '../data'
-import { fmtMD, rangeDays, weekday, yuan, type SchemeStats } from '../logic'
+import { useId, useState } from 'react'
+import { MATCH_DIMENSIONS, MATCH_WEIGHTS, fmtMD, pickBest, rangeDays, weekday, yuan, type SchemeStats } from '../logic'
 import type { MemberId, Scheme, SchemeId } from '../types'
 import Avatar from './Avatar'
 
@@ -39,6 +43,8 @@ const EXCLUDE_REASON: Record<SchemeId, Partial<Record<MemberId, string>>> = {
 export default function Consensus({ stats, selected, locked, hasMine, onSelect, onLock, onUnlock, onFill }: Props) {
   const scheme = schemeById(selected)
   const st = stats[selected]
+  const bestId = hasMine ? pickBest(stats) : null
+  const [methodOpen, setMethodOpen] = useState(false)
 
   return (
     <section id="consensus" className="pt-14 sm:pt-20">
@@ -86,6 +92,12 @@ export default function Consensus({ stats, selected, locked, hasMine, onSelect, 
                     <span className="hidden sm:inline">已锁定</span>
                   </span>
                 )}
+                {bestId === s.id && locked !== s.id && (
+                  <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? 'bg-sky-500 text-white' : 'bg-sky-50 text-sky-700'}`}>
+                    <Sparkles className="h-2.5 w-2.5" />
+                    <span className="hidden sm:inline">你的最佳</span>
+                  </span>
+                )}
               </div>
               <p className={`mt-1.5 text-[15px] font-extrabold sm:text-lg ${active ? 'text-white' : 'text-ink-900'}`}>{s.label}</p>
               <p className={`mt-0.5 text-xs sm:text-sm ${active ? 'text-white/70' : 'text-ink-500'}`}>
@@ -105,7 +117,7 @@ export default function Consensus({ stats, selected, locked, hasMine, onSelect, 
       <div key={selected} className="mt-4 grid animate-slide-up gap-4 lg:grid-cols-[1.35fr_1fr]">
         <SchemeDetail scheme={scheme} st={st} />
         <div className="flex flex-col gap-4">
-          <ExplainCard scheme={scheme} st={st} />
+          <ExplainCard scheme={scheme} st={st} methodOpen={methodOpen} onToggleMethod={() => setMethodOpen((v) => !v)} />
           <AiTipCard scheme={scheme} />
           <LockPanel scheme={scheme} locked={locked} onLock={onLock} onUnlock={onUnlock} />
         </div>
@@ -301,7 +313,7 @@ function MatchRing({ value }: { value: number }) {
   )
 }
 
-function ExplainCard({ scheme, st }: { scheme: Scheme; st: SchemeStats }) {
+function ExplainCard({ scheme, st, methodOpen, onToggleMethod }: { scheme: Scheme; st: SchemeStats; methodOpen: boolean; onToggleMethod: () => void }) {
   const dims = [
     { label: '日期可行', a: st.dateFitCount, b: st.filledCount, unit: '人' },
     { label: '预算符合', a: st.budgetFitCount, b: st.filledCount, unit: '人' },
@@ -339,6 +351,71 @@ function ExplainCard({ scheme, st }: { scheme: Scheme; st: SchemeStats }) {
           )
         })}
       </ul>
+      <MatchMethod open={methodOpen} onToggle={onToggleMethod} st={st} />
+    </div>
+  )
+}
+
+function MatchMethod({ open, onToggle, st }: { open: boolean; onToggle: () => void; st: SchemeStats }) {
+  const panelId = useId()
+  const total = Object.values(MATCH_WEIGHTS).reduce((a, b) => a + b, 0)
+  const parts = st.myFit?.parts
+  return (
+    <div className="mt-5 border-t border-dashed border-cream-300 pt-4">
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="flex w-full items-center justify-between rounded-xl py-1 text-left text-[13px] font-semibold text-sky-700 hover:text-sky-600"
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <Calculator className="h-4 w-4" />
+          匹配度如何计算？
+        </span>
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div id={panelId} role="region" aria-label="匹配度计算依据" className="mt-3 animate-fade-in">
+          <p className="text-xs leading-5 text-ink-500">
+            每位成员按五个维度得到 0–100 分，团队匹配度为全部已填写成员得分的平均值。
+          </p>
+          <ul className="mt-3 space-y-2.5">
+            {MATCH_DIMENSIONS.map((d) => {
+              const w = MATCH_WEIGHTS[d.key]
+              const mine = parts?.[d.key]
+              return (
+                <li key={d.key}>
+                  <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                    <span className="font-semibold text-ink-700">{d.label}</span>
+                    <span className="num shrink-0 text-ink-500">
+                      {mine !== undefined && <span className="mr-2 text-sky-700">你 {mine}/{w}</span>}
+                      权重 <span className="font-bold text-ink-800">{w}%</span>
+                    </span>
+                  </div>
+                  <div className="relative mt-1 h-2 overflow-hidden rounded-full bg-cream-200">
+                    <div className="absolute inset-y-0 left-0 rounded-full bg-coral-200" style={{ width: `${w}%` }} />
+                    {mine !== undefined && <div className="absolute inset-y-0 left-0 rounded-full bg-coral-500" style={{ width: `${mine}%` }} />}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-4 text-ink-400">{d.rule}</p>
+                </li>
+              )
+            })}
+          </ul>
+          <p className="num mt-3 flex items-center justify-between rounded-xl bg-cream-50 px-3 py-2 text-xs ring-1 ring-cream-200">
+            <span className="text-ink-500">权重合计</span>
+            <span className="font-bold text-ink-800">{total}%</span>
+          </p>
+          {parts && (
+            <p className="num mt-2 text-xs text-sky-700">
+              你在该方案的个人得分：{st.myFit!.score} 分（深色为你的得分，浅色为满分）
+            </p>
+          )}
+          <p className="mt-3 flex items-start gap-1.5 text-xs leading-5 text-ink-500">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-400" />
+            匹配度由确定性规则引擎计算，AI负责解释结果与生成行程建议。
+          </p>
+        </div>
+      )}
     </div>
   )
 }

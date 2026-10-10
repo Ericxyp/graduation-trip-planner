@@ -165,8 +165,13 @@ export default function Settlement({ scheme, stats, exited, paid, isLocked, onTo
               else status = { text: '待支付', cls: 'text-amber-700 bg-amber-50' }
 
               return (
-                <li key={id} className={`flex items-center gap-3 rounded-2xl p-2.5 transition ${out ? 'bg-cream-50' : 'hover:bg-cream-50'}`}>
-                  <Avatar id={id} size="md" dim={out} ring={false} />
+                <li key={id} className={`flex items-center gap-2 rounded-2xl p-2 transition sm:gap-3 sm:p-2.5 ${out ? 'bg-cream-50' : 'hover:bg-cream-50'}`}>
+                  <span className="hidden min-[400px]:inline-flex">
+                    <Avatar id={id} size="md" dim={out} ring={false} />
+                  </span>
+                  <span className="inline-flex min-[400px]:hidden">
+                    <Avatar id={id} size="sm" dim={out} ring={false} />
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className={`flex items-center gap-1 text-sm font-semibold ${out ? 'text-ink-400 line-through' : 'text-ink-800'}`}>
                       {m.name}
@@ -181,7 +186,7 @@ export default function Settlement({ scheme, stats, exited, paid, isLocked, onTo
                   {!out && (
                     <button
                       onClick={() => onTogglePaid(id, m.name)}
-                      className={`inline-flex shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-semibold transition sm:px-3 ${
                         isPaid ? 'text-ink-500 hover:bg-cream-200' : 'bg-ink-800 text-white hover:bg-ink-700'
                       }`}
                     >

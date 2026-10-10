@@ -1,4 +1,4 @@
-import { ArrowRight, Check, ClipboardList, Crown, Lock, MapPin, PenLine, Plane, Route, Sparkles, UserPlus, Wallet } from 'lucide-react'
+import { ArrowRight, Check, PlayCircle, ClipboardList, Crown, Lock, MapPin, PenLine, Plane, Route, Sparkles, UserPlus, Wallet } from 'lucide-react'
 import { MEMBERS, TRIP } from '../data'
 import type { Scheme } from '../types'
 import Avatar from './Avatar'
@@ -14,6 +14,7 @@ interface Props {
   settleCount: number
   onFill: () => void
   onInvite: () => void
+  onDemo: () => void
   onJump: (id: string) => void
 }
 
@@ -66,7 +67,7 @@ export default function Overview(p: Props) {
             <MapPin className="h-3.5 w-3.5" />
             毕业季 · 多人旅行共识助手
           </span>
-          <h1 className="mt-4 text-[32px] font-extrabold leading-[1.15] tracking-tight text-ink-900 sm:text-[44px]">
+          <h1 className="mt-4 text-[28px] font-extrabold leading-[1.15] tracking-tight text-ink-900 min-[375px]:text-[32px] sm:text-[44px]">
             8个人，24种想法，
             <br />
             <span className="relative inline-block">
@@ -79,6 +80,10 @@ export default function Overview(p: Props) {
             <span className="font-semibold text-ink-700">可解释</span>
             的组队与行程方案。不用在群里反复接龙，也不用当面开口说“我预算不够”。
           </p>
+          <button onClick={p.onDemo} className="mt-4 inline-flex items-center gap-1.5 self-start rounded-full py-1 text-sm font-semibold text-sky-700 hover:text-sky-600 md:hidden">
+            <PlayCircle className="h-4 w-4" />
+            体验完整流程 · 3分钟看懂
+          </button>
           <div className="mt-6 hidden flex-wrap gap-3 sm:flex">
             <button onClick={p.onFill} className="btn-primary">
               <PenLine className="h-4 w-4" />

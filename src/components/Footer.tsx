@@ -1,6 +1,6 @@
-import { RotateCcw, Ticket } from 'lucide-react'
+import { PlayCircle, RotateCcw, Ticket } from 'lucide-react'
 
-export default function Footer({ onReset }: { onReset: () => void }) {
+export default function Footer({ onReset, onDemo }: { onReset: () => void; onDemo: () => void }) {
   return (
     <footer className="mt-20 border-t border-dashed border-cream-300 py-10">
       <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
@@ -13,10 +13,16 @@ export default function Footer({ onReset }: { onReset: () => void }) {
             <p className="text-xs text-ink-400">共识方案由规则引擎基于成员偏好计算生成，仅供决策参考</p>
           </div>
         </div>
+        <div className="flex flex-wrap justify-center gap-2">
+        <button onClick={onDemo} className="btn-ghost text-sm">
+          <PlayCircle className="h-4 w-4" />
+          体验完整流程
+        </button>
         <button onClick={onReset} className="btn-ghost text-sm">
           <RotateCcw className="h-4 w-4" />
           重置演示数据
         </button>
+        </div>
       </div>
     </footer>
   )

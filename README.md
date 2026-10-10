@@ -4,6 +4,12 @@
 
 技术栈：React 18 + Vite 6 + TypeScript + Tailwind CSS v4 + lucide-react，数据为本地模拟数据 + localStorage。
 
+## 笔试展示功能
+- 首次访问三步引导（独立 key `biye-dazi-ju:onboarding-seen`，重置演示数据不会清除）
+- 提交/修改偏好后弹出“你的加入改变了结果”，前后数据均由 `computeStats` 实时计算
+- 共识区“匹配度如何计算？”：权重来自 `src/logic.ts` 的 `MATCH_WEIGHTS`（40/20/20/10/10）
+- “体验完整流程”演示面板：预填偏好、比较方案、锁定成都、模拟退出、重置
+
 ## 本地运行
 ```bash
 npm install

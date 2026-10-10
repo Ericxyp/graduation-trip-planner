@@ -1,0 +1,146 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --color-coral-50: #fff3ef;
+  --color-coral-100: #ffe3da;
+  --color-coral-200: #ffc6b4;
+  --color-coral-300: #ffa287;
+  --color-coral-400: #ff825f;
+  --color-coral-500: #ff6b4a;
+  --color-coral-600: #e8502f;
+  --color-coral-700: #c23e22;
+
+  --color-sky-50: #eef7fd;
+  --color-sky-100: #d9edfa;
+  --color-sky-200: #b3dbf5;
+  --color-sky-400: #5aaee6;
+  --color-sky-500: #3d97d6;
+  --color-sky-600: #2a7ab5;
+  --color-sky-700: #1f5f8e;
+
+  --color-cream-50: #fffcf7;
+  --color-cream-100: #fbf6ee;
+  --color-cream-200: #f4ebdc;
+  --color-cream-300: #e9dcc6;
+
+  --color-ink-300: #a3a8b8;
+  --color-ink-400: #7a8094;
+  --color-ink-500: #5a6075;
+  --color-ink-600: #3e4458;
+  --color-ink-700: #2a2f40;
+  --color-ink-800: #1f2433;
+  --color-ink-900: #151925;
+
+  --shadow-card: 0 1px 2px rgba(31, 36, 51, 0.04), 0 8px 24px -12px rgba(31, 36, 51, 0.14);
+  --shadow-lift: 0 2px 4px rgba(31, 36, 51, 0.05), 0 18px 40px -16px rgba(31, 36, 51, 0.26);
+
+  --animate-slide-up: slide-up 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in 0.2s ease-out;
+  --animate-sheet-in: sheet-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-panel-in: panel-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-stamp: stamp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+  @keyframes slide-up {
+    from { transform: translateY(14px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes sheet-in {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @keyframes panel-in {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+  @keyframes stamp {
+    0% { transform: scale(1.5) rotate(-10deg); opacity: 0; }
+    60% { transform: scale(0.95) rotate(-10deg); opacity: 1; }
+    100% { transform: scale(1) rotate(-10deg); opacity: 1; }
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 76px;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-cream-100 text-ink-800 font-sans antialiased;
+    background-image: radial-gradient(rgba(31, 36, 51, 0.05) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-sky-500);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-3xl bg-white shadow-card ring-1 ring-ink-800/5;
+  }
+  .section-eyebrow {
+    @apply inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold tracking-[0.18em] text-coral-600 uppercase;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-semibold transition active:scale-[0.98] disabled:opacity-50 bg-coral-500 px-5 py-3 text-white shadow-[0_6px_16px_-6px_rgba(232,80,47,0.6)] hover:bg-coral-600;
+  }
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-semibold transition active:scale-[0.98] disabled:opacity-50 bg-ink-800 px-5 py-3 text-white hover:bg-ink-700;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-semibold transition active:scale-[0.98] disabled:opacity-50 bg-white px-4 py-2.5 text-ink-700 ring-1 ring-ink-800/10 hover:bg-cream-50 hover:ring-ink-800/20;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* 票根缺口 */
+.ticket-notch {
+  --notch: 14px;
+  -webkit-mask:
+    radial-gradient(circle var(--notch) at 0 var(--notch-y, 50%), transparent 98%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle var(--notch) at 100% var(--notch-y, 50%), transparent 98%, #000) right / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle var(--notch) at 0 var(--notch-y, 50%), transparent 98%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle var(--notch) at 100% var(--notch-y, 50%), transparent 98%, #000) right / 51% 100% no-repeat;
+}
+
+.dash-route {
+  background-image: linear-gradient(90deg, currentColor 55%, transparent 0);
+  background-size: 10px 2px;
+  background-repeat: repeat-x;
+  background-position: center;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

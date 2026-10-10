@@ -1,4 +1,5 @@
-import { PlayCircle, RotateCcw, Ticket, UserPlus } from 'lucide-react'
+import { CirclePlus, PlayCircle, RotateCcw, Ticket, UserPlus } from 'lucide-react'
+import { linkProps } from '../router'
 
 const NAV = [
   { id: 'overview', label: '总览' },
@@ -34,6 +35,13 @@ export default function Header({ onInvite, onReset, onDemo }: { onInvite: () => 
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          <a
+            {...linkProps('/create')}
+            className="hidden h-10 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-coral-700 transition hover:bg-white lg:inline-flex"
+          >
+            <CirclePlus className="h-4 w-4" />
+            创建旅行局
+          </a>
           <button
             onClick={onDemo}
             className="hidden h-10 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-sky-700 transition hover:bg-white md:inline-flex"

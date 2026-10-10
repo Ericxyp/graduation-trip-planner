@@ -1,32 +1,10 @@
 import { BUDGET_OPTIONS, MEMBERS, SCHEMES } from './data'
 import type { CostItem, MemberId, MyPrefs, Scheme, SchemeId } from './types'
 
-/**
- * 匹配度权重（总和 100）。computeStats 与界面中的“如何计算”说明共用此常量，
- * 修改权重时两处会同步变化。
- */
-export const MATCH_WEIGHTS = {
-  dates: 40,
-  budget: 20,
-  destination: 20,
-  pace: 10,
-  stay: 10,
-} as const
+import { DEST_RANK_RATIO, MATCH_WEIGHTS, PACE_ADJACENT_RATIO, type MatchDimension } from './shared/weights'
 
-export type MatchDimension = keyof typeof MATCH_WEIGHTS
-
-export const MATCH_DIMENSIONS: { key: MatchDimension; label: string; rule: string }[] = [
-  { key: 'dates', label: '日期匹配', rule: '可出发日期完整覆盖方案日期得满分，否则为 0' },
-  { key: 'budget', label: '预算匹配', rule: '预算上限不低于方案人均得满分，否则为 0' },
-  { key: 'destination', label: '目的地偏好', rule: '按志愿顺序递减：第一志愿 100%、第二 70%、第三 40%' },
-  { key: 'pace', label: '旅行节奏', rule: '节奏一致得满分；一方为“适中”得 60%；特种兵与度假相反为 0' },
-  { key: 'stay', label: '住宿要求', rule: '方案住宿类型满足你的要求得满分，否则为 0' },
-]
-
-/** 目的地志愿顺序对应的得分比例 */
-export const DEST_RANK_RATIO: Record<number, number> = { 1: 1, 2: 0.7, 3: 0.4 }
-/** 节奏相邻（任一方为“适中”）时的得分比例 */
-export const PACE_ADJACENT_RATIO = 0.6
+/** 权重与说明来自 src/shared/weights.ts，演示与云端规则引擎共用 */
+export { DEST_RANK_RATIO, MATCH_DIMENSIONS, MATCH_WEIGHTS, PACE_ADJACENT_RATIO, type MatchDimension } from './shared/weights'
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 

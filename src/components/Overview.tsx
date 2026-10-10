@@ -1,6 +1,7 @@
-import { ArrowRight, Check, PlayCircle, ClipboardList, Crown, Lock, MapPin, PenLine, Plane, Route, Sparkles, UserPlus, Wallet } from 'lucide-react'
+import { ArrowRight, Check, CirclePlus, PlayCircle, ClipboardList, Crown, Lock, MapPin, PenLine, Plane, Route, Sparkles, UserPlus, Wallet } from 'lucide-react'
 import { MEMBERS, TRIP } from '../data'
 import type { Scheme } from '../types'
+import { linkProps } from '../router'
 import Avatar from './Avatar'
 
 interface Props {
@@ -84,6 +85,10 @@ export default function Overview(p: Props) {
             <PlayCircle className="h-4 w-4" />
             体验完整流程 · 3分钟看懂
           </button>
+          <a {...linkProps('/create')} className="mt-2 inline-flex items-center gap-1.5 self-start rounded-full py-1 text-sm font-semibold text-coral-700 hover:text-coral-600 lg:hidden">
+            <CirclePlus className="h-4 w-4" />
+            创建我们自己的旅行局
+          </a>
           <div className="mt-6 hidden flex-wrap gap-3 sm:flex">
             <button onClick={p.onFill} className="btn-primary">
               <PenLine className="h-4 w-4" />

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Check, Plus, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { BUDGET_OPTIONS, DATE_OPTIONS, DEST_OPTIONS, MUST_OPTIONS, NO_OPTIONS, PACE_OPTIONS, STAY_OPTIONS } from '../data'
 import { parseDate, weekday } from '../logic'
-import type { DestId, MyPrefs, Pace, StayPref } from '../types'
+import type { MyPrefs, Pace, StayPref } from '../types'
 
 interface Props {
   open: boolean
@@ -12,12 +12,17 @@ interface Props {
   onPresetConsumed?: () => void
   onClose: () => void
   onSubmit: (p: MyPrefs) => void
+  /** 云端旅行局传入自己的日期范围与候选目的地；不传则使用演示数据 */
+  dateOptions?: string[]
+  destOptions?: { id: string; name: string; desc: string }[]
+  /** 提交中（云端保存期间禁用按钮，防止重复提交） */
+  busy?: boolean
 }
 
 interface Draft {
   dates: string[]
   budget: string
-  destinations: DestId[]
+  destinations: string[]
   pace: Pace
   stay: StayPref
   musts: string[]
@@ -26,7 +31,7 @@ interface Draft {
 
 const empty = (): Draft => ({ dates: [], budget: '', destinations: [], pace: 'balanced', stay: 'any', musts: [], nos: [] })
 
-export default function PreferenceSheet({ open, initial, preset, onPresetConsumed, onClose, onSubmit }: Props) {
+export default function PreferenceSheet({ open, initial, preset, onPresetConsumed, onClose, onSubmit, dateOptions = DATE_OPTIONS, destOptions = DEST_OPTIONS, busy = false }: Props) {
   const [d, setD] = useState<Draft>(empty)
   const [touched, setTouched] = useState(false)
   const [usedPreset, setUsedPreset] = useState(false)
@@ -76,7 +81,7 @@ export default function PreferenceSheet({ open, initial, preset, onPresetConsume
   const toggle = <K extends 'dates' | 'musts' | 'nos'>(key: K, v: string) =>
     setD((s) => ({ ...s, [key]: s[key].includes(v) ? s[key].filter((x) => x !== v) : [...s[key], v].sort() }))
 
-  const toggleDest = (id: DestId) =>
+  const toggleDest = (id: string) =>
     setD((s) => ({ ...s, destinations: s.destinations.includes(id) ? s.destinations.filter((x) => x !== id) : [...s.destinations, id] }))
 
   const move = (i: number, dir: -1 | 1) =>
@@ -132,7 +137,7 @@ export default function PreferenceSheet({ open, initial, preset, onPresetConsume
         <div className="flex-1 space-y-7 overflow-y-auto px-5 pb-6 pt-5 sm:px-7">
           <Field title="可出发日期" hint="多选，选得越多越容易凑齐" error={touched ? errors.dates : ''}>
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
-              {DATE_OPTIONS.map((ds) => {
+              {dateOptions.map((ds) => {
                 const on = d.dates.includes(ds)
                 const dt = parseDate(ds)
                 return (
@@ -147,7 +152,7 @@ export default function PreferenceSheet({ open, initial, preset, onPresetConsume
                   >
                     <span className={`text-[10px] ${on ? 'text-white/80' : 'text-ink-400'}`}>{weekday(ds)}</span>
                     <span className="num text-base font-black leading-6">{dt.getDate()}</span>
-                    <span className={`text-[10px] ${on ? 'text-white/80' : 'text-ink-400'}`}>6月</span>
+                    <span className={`text-[10px] ${on ? 'text-white/80' : 'text-ink-400'}`}>{dt.getMonth() + 1}月</span>
                   </button>
                 )
               })}
@@ -168,7 +173,7 @@ export default function PreferenceSheet({ open, initial, preset, onPresetConsume
             {d.destinations.length > 0 && (
               <ol className="mb-2 space-y-2">
                 {d.destinations.map((id, i) => {
-                  const o = DEST_OPTIONS.find((x) => x.id === id)!
+                  const o = destOptions.find((x) => x.id === id) ?? { id, name: id, desc: '' }
                   return (
                     <li key={id} className="flex items-center gap-3 rounded-xl bg-white p-2.5 pl-3 ring-1 ring-coral-300">
                       <span className="num flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-coral-500 text-sm font-black text-white">{i + 1}</span>
@@ -197,7 +202,7 @@ export default function PreferenceSheet({ open, initial, preset, onPresetConsume
               </ol>
             )}
             <div className="flex flex-wrap gap-2">
-              {DEST_OPTIONS.filter((o) => !d.destinations.includes(o.id)).map((o) => (
+              {destOptions.filter((o) => !d.destinations.includes(o.id)).map((o) => (
                 <button
                   key={o.id}
                   type="button"
@@ -255,9 +260,9 @@ export default function PreferenceSheet({ open, initial, preset, onPresetConsume
 
         <div className="border-t border-ink-800/5 bg-white px-5 pb-[max(16px,env(safe-area-inset-bottom))] pt-3 sm:px-7 sm:pb-5">
           {touched && hasError && <p className="mb-2 text-center text-xs font-medium text-coral-600">还有 {missing} 项必填内容未完成</p>}
-          <button onClick={submit} className="btn-primary w-full py-3.5 text-[15px]">
+          <button onClick={submit} disabled={busy} aria-busy={busy} className="btn-primary w-full py-3.5 text-[15px]">
             <Check className="h-4 w-4" />
-            {initial ? '保存修改' : '提交偏好'}
+            {busy ? '正在保存…' : initial ? '保存修改' : '提交偏好'}
           </button>
         </div>
       </div>

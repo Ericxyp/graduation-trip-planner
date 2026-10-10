@@ -10,14 +10,14 @@ export interface Member {
   filledAt?: string
 }
 
-export type Pace = 'rush' | 'balanced' | 'relax'
-export type StayPref = 'any' | 'homestay' | 'hotel' | 'private-bath'
+import type { Pace, StayPref } from './shared/options'
+export type { Pace, StayPref }
 export type DestId = 'chengdu' | 'qingdao' | 'changsha'
 
 export interface MyPrefs {
   dates: string[] // 'YYYY-MM-DD'
   budget: string // budget option id
-  destinations: DestId[] // ordered
+  destinations: string[] // ordered（演示模式为城市 id，云端为城市名）
   pace: Pace
   stay: StayPref
   musts: string[]

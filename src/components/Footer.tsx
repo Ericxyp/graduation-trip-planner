@@ -1,4 +1,5 @@
-import { PlayCircle, RotateCcw, Ticket } from 'lucide-react'
+import { CirclePlus, PlayCircle, RotateCcw, Ticket } from 'lucide-react'
+import { linkProps } from '../router'
 
 export default function Footer({ onReset, onDemo }: { onReset: () => void; onDemo: () => void }) {
   return (
@@ -14,6 +15,10 @@ export default function Footer({ onReset, onDemo }: { onReset: () => void; onDem
           </div>
         </div>
         <div className="flex flex-wrap justify-center gap-2">
+        <a {...linkProps('/create')} className="btn-ghost text-sm">
+          <CirclePlus className="h-4 w-4" />
+          创建旅行局
+        </a>
         <button onClick={onDemo} className="btn-ghost text-sm">
           <PlayCircle className="h-4 w-4" />
           体验完整流程

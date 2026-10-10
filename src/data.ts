@@ -1,4 +1,5 @@
-import type { AppState, DestId, Member, MemberId, Pace, Scheme, StayPref } from './types'
+import type { AppState, DestId, Member, MemberId, Scheme } from './types'
+export { BUDGET_OPTIONS, MUST_OPTIONS, NO_OPTIONS, PACE_LABEL, PACE_OPTIONS, STAY_OPTIONS } from './shared/options'
 
 export const TRIP = {
   name: '2027届毕业旅行',
@@ -26,37 +27,13 @@ export const memberById = (id: MemberId) => MEMBERS.find((m) => m.id === id)!
 
 export const DATE_OPTIONS = ['2027-06-18', '2027-06-19', '2027-06-20', '2027-06-21', '2027-06-22', '2027-06-23', '2027-06-24']
 
-export const BUDGET_OPTIONS = [
-  { id: 'b1', label: '2000 以内', min: 0, max: 2000 },
-  { id: 'b2', label: '2000–2500', min: 2000, max: 2500 },
-  { id: 'b3', label: '2500–3000', min: 2500, max: 3000 },
-  { id: 'b4', label: '3000–3500', min: 3000, max: 3500 },
-  { id: 'b5', label: '3500 以上', min: 3500, max: 99999 },
-]
-
 export const DEST_OPTIONS: { id: DestId; name: string; desc: string }[] = [
   { id: 'chengdu', name: '成都', desc: '火锅、熊猫与慢生活' },
   { id: 'qingdao', name: '青岛', desc: '海边日出与啤酒' },
   { id: 'changsha', name: '长沙', desc: '夜宵、岳麓山与橘子洲' },
 ]
 
-export const PACE_OPTIONS: { id: Pace; label: string; desc: string }[] = [
-  { id: 'rush', label: '特种兵', desc: '一天三个点，体力拉满' },
-  { id: 'balanced', label: '适中', desc: '有安排，也留时间发呆' },
-  { id: 'relax', label: '度假', desc: '睡到自然醒，随走随停' },
-]
 
-export const STAY_OPTIONS: { id: StayPref; label: string }[] = [
-  { id: 'any', label: '不挑，干净安全就行' },
-  { id: 'homestay', label: '整租民宿，大家住一起' },
-  { id: 'hotel', label: '连锁酒店，两人一间' },
-  { id: 'private-bath', label: '必须有独立卫浴' },
-]
-
-export const MUST_OPTIONS = ['要有毕业合影/跟拍', '能吃到地道本地菜', '每天睡够7小时', '单程交通5小时内', '有山或海的风景']
-export const NO_OPTIONS = ['早于7点集合', '红眼航班或夜车', '一天暴走超过2万步', '35°C以上高温暴晒', '6人以上混住一间']
-
-export const PACE_LABEL: Record<Pace, string> = { rush: '特种兵', balanced: '适中', relax: '度假' }
 
 const DESTS_ALL: Record<DestId, string> = { chengdu: '成都', qingdao: '青岛', changsha: '长沙' }
 export const destName = (d: DestId) => DESTS_ALL[d]

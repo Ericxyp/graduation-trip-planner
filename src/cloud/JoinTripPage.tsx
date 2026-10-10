@@ -27,6 +27,14 @@ export default function JoinTripPage({ slug }: { slug: string }) {
 
   useEffect(() => {
     if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    // 同一页面打开了新的邀请链接（只有 # 部分变化）时，读取新的邀请码
+    const onHash = () => {
+      const c = codeFromHash()
+      if (c) setCode(c)
+      if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
   useEffect(() => {
@@ -75,7 +83,7 @@ export default function JoinTripPage({ slug }: { slug: string }) {
   }
   if (!trip) return <PageSkeleton />
 
-  const closed = trip.inviteExpired || trip.isFull || trip.status === 'archived'
+  const closed = trip.inviteStatus ? trip.inviteStatus !== 'open' : trip.inviteExpired || trip.isFull || trip.status === 'archived'
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -98,7 +106,7 @@ export default function JoinTripPage({ slug }: { slug: string }) {
       const msg = ae?.message ?? '加入失败，请稍后重试'
       const field = ae?.code === 'DISPLAY_NAME_TAKEN' ? 'name' : ae?.code === 'INVALID_INVITE_CODE' ? 'code' : 'form'
       setError({ field, msg })
-      if (ae?.code === 'MEMBER_LIMIT_REACHED' || ae?.code === 'INVITE_EXPIRED') api.getPublic(slug).then((r) => setTrip(r.trip)).catch(() => {})
+      if (ae?.code === 'MEMBER_LIMIT_REACHED' || ae?.code === 'INVITE_EXPIRED' || ae?.code === 'INVITE_PAUSED' || ae?.code === 'TRIP_ARCHIVED') api.getPublic(slug).then((r) => setTrip(r.trip)).catch(() => {})
     } finally {
       submitting.current = false
       setBusy(false)
@@ -158,7 +166,14 @@ export default function JoinTripPage({ slug }: { slug: string }) {
         </div>
 
         {closed ? (
-          <StateCard title={trip.isFull ? '旅行局人数已满' : '邀请已过期'} desc={trip.isFull ? '可以请发起人调整人数上限，或移除未参加的成员。' : '请联系发起人获取新的邀请。'} />
+          <StateCard
+            title={trip.inviteStatus === 'paused' ? '发起人暂停了邀请' : trip.inviteStatus === 'closed' ? '旅行局已解散' : trip.isFull ? '旅行局人数已满' : '邀请已过期'}
+            desc={trip.inviteStatus === 'paused' ? '稍后再试，或联系发起人恢复邀请。' : trip.inviteStatus === 'closed' ? '这个旅行局已不再接受新成员。' : trip.isFull ? '可以请发起人移除未参加的成员后再加入。' : '请联系发起人延长截止时间或获取新的邀请。'}
+          >
+            <a {...linkProps(`/trip/${slug}/recover`)} className="btn-ghost px-5 py-2.5 text-sm">
+              我是发起人，找回身份
+            </a>
+          </StateCard>
         ) : (
           <form onSubmit={submit} noValidate className="card mt-4 space-y-5 p-5 sm:p-6" aria-busy={busy}>
             <Field label="你的昵称" hint="同局内不能重名" htmlFor="nick" error={error?.field === 'name' ? error.msg : undefined}>
@@ -176,6 +191,11 @@ export default function JoinTripPage({ slug }: { slug: string }) {
               {busy ? '正在加入…' : '加入并填写偏好'}
             </button>
             <p className="text-center text-xs leading-5 text-ink-400">预算和底线条件仅用于系统匹配，其他成员看不到。</p>
+            <p className="text-center text-xs">
+              <a {...linkProps(`/trip/${slug}/recover`)} className="font-semibold text-sky-700 hover:underline">
+                我是发起人，换了设备？用恢复码找回身份
+              </a>
+            </p>
           </form>
         )}
       </main>

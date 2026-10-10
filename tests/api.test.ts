@@ -2,8 +2,8 @@
  * API 集成测试：直接调用 handleApi（与 Vercel Function 同一入口），连接真实 Postgres。
  *
  * 需要：TEST_DATABASE_URL=postgres://user:pass@localhost:5432/gradtrip_test
- * 安全：会清空并重建测试库中的表，因此只允许连接 localhost / 127.0.0.1，
- *      或显式设置 ALLOW_TEST_DB_RESET=1（只对一次性的 Neon 测试分支使用）。绝不要指向生产库。
+ * 安全：会清空并重建测试库中的表，因此只允许 host 为 localhost / 127.0.0.1 / ::1 且库名包含 “test” 的本地库；
+ *      不满足时整组跳过，绝不会连接 Neon 或任何远程数据库。
  * 未设置 TEST_DATABASE_URL 时整组测试跳过。
  */
 import assert from 'node:assert/strict'
@@ -16,15 +16,27 @@ import { handleApi } from '../server/router.js'
 import { createPgWireDb } from './helpers/pgwire.js'
 
 const url = process.env.TEST_DATABASE_URL
-const safe = !!url && (/@(localhost|127\.0\.0\.1)[:/]/.test(url) || process.env.ALLOW_TEST_DB_RESET === '1')
+export function isSafeTestDb(raw: string | undefined): boolean {
+  if (!raw) return false
+  try {
+    const u = new URL(raw)
+    return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(u.hostname) && /test/i.test(u.pathname.slice(1))
+  } catch {
+    return false
+  }
+}
+const safe = isSafeTestDb(url)
 const ORIGIN = 'https://biye-dazi-ju.vercel.app'
 const db = url ? createPgWireDb(url) : null
 const config = { ...readConfig({ DATABASE_URL: url, TOKEN_PEPPER: 'test-pepper-0123456789abcdef', APP_ORIGIN: ORIGIN }) }
 
+const rnd = () => Math.floor(Math.random() * 250) + 1
+
 async function call<T = any>(method: string, path: string, body?: unknown, token?: string, headers: Record<string, string> = {}) {
   const req = new Request(`${ORIGIN}${path}`, {
     method,
-    headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
+    // 默认每个请求一个随机来源 IP，避免测试之间共享限流桶；限流测试会显式指定 IP
+    headers: { 'x-forwarded-for': `10.${rnd()}.${rnd()}.${rnd()}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
     body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
   })
   const res = await handleApi(req, { config, db: () => db! })
@@ -43,7 +55,7 @@ const tripInput = {
 const prefsA: Preferences = { dates: ['2027-06-20', '2027-06-21', '2027-06-22', '2027-06-23'], budgetId: 'b4', destinations: ['成都', '青岛'], pace: 'balanced', stay: 'any', musts: ['要有毕业合影/跟拍'], nos: ['红眼航班或夜车'] }
 const prefsB: Preferences = { dates: ['2027-06-19', '2027-06-20', '2027-06-21', '2027-06-22', '2027-06-23'], budgetId: 'b2', destinations: ['长沙', '成都'], pace: 'relax', stay: 'hotel', musts: ['每天睡够7小时'], nos: ['35°C以上高温暴晒'] }
 
-describe('API 集成（需要 TEST_DATABASE_URL）', { skip: !url ? '未设置 TEST_DATABASE_URL' : !safe ? 'TEST_DATABASE_URL 不是本地库，且未设置 ALLOW_TEST_DB_RESET=1' : false }, () => {
+describe('API 集成（需要 TEST_DATABASE_URL）', { skip: !url ? '未设置 TEST_DATABASE_URL' : !safe ? 'TEST_DATABASE_URL 不是本地测试库（需 localhost 且库名含 test），为保护数据已跳过' : false }, () => {
   let created: CreateTripResult
   let joined: JoinTripResult
   let slug = ''
@@ -51,9 +63,13 @@ describe('API 集成（需要 TEST_DATABASE_URL）', { skip: !url ? '未设置 T
   let tokB = ''
 
   before(async () => {
-    await db!.exec('DROP TABLE IF EXISTS trip_state, preferences, members, trips, schema_migrations CASCADE')
-    await db!.exec(readFileSync('db/migrations/001_initial.sql', 'utf8'))
-    await db!.exec(readFileSync('db/migrations/001_initial.sql', 'utf8')) // 幂等：重复执行不报错
+    assert.ok(isSafeTestDb(url), '只允许重置本地测试库')
+    await db!.exec('DROP TABLE IF EXISTS rate_limits, activity_events, expense_shares, expenses, member_sessions, trip_state, preferences, members, trips, schema_migrations CASCADE')
+    for (let i = 0; i < 2; i++) {
+      // 幂等：两次按顺序执行全部迁移都不报错
+      await db!.exec(readFileSync('db/migrations/001_initial.sql', 'utf8'))
+      await db!.exec(readFileSync('db/migrations/002_stage_three.sql', 'utf8'))
+    }
     resetRateLimits()
   })
   after(() => resetRateLimits())
@@ -83,7 +99,7 @@ describe('API 集成（需要 TEST_DATABASE_URL）', { skip: !url ? '未设置 T
   it('访客可读取公开摘要，但不能读取共享状态', async () => {
     const pub = await call('GET', `/api/trips/${slug}/public`)
     assert.equal(pub.status, 200)
-    assert.deepEqual(Object.keys(pub.body.trip).sort(), ['candidateDestinations', 'createdAt', 'dateEnd', 'dateStart', 'inviteDeadline', 'inviteExpired', 'isFull', 'memberCount', 'memberLimit', 'name', 'organizerName', 'originCity', 'slug', 'status'])
+    assert.deepEqual(Object.keys(pub.body.trip).sort(), ['candidateDestinations', 'createdAt', 'dateEnd', 'dateStart', 'inviteDeadline', 'inviteExpired', 'inviteStatus', 'isFull', 'memberCount', 'memberLimit', 'name', 'organizerName', 'originCity', 'slug', 'status'])
     const anon = await call('GET', `/api/trips/${slug}`)
     assert.equal(anon.status, 401)
     assert.equal(anon.body.error.code, 'UNAUTHORIZED')

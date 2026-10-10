@@ -18,12 +18,21 @@ const STATUS: Record<ApiErrorCode, number> = {
   NOT_CONFIGURED: 503,
   DATABASE_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
+  INVITE_PAUSED: 403,
+  TRIP_ARCHIVED: 409,
+  MEMBER_LEFT: 401,
+  ORGANIZER_CANNOT_LEAVE: 409,
+  INVALID_RECOVERY_CODE: 403,
+  EXPENSE_NOT_FOUND: 404,
+  NOT_LOCKED: 409,
 }
 
 /** 业务错误：message 面向用户，绝不包含 SQL、token 或堆栈 */
 export class ApiError extends Error {
   readonly code: ApiErrorCode
   readonly status: number
+  /** 429 时的 Retry-After（秒） */
+  retryAfter?: number
   constructor(code: ApiErrorCode, message: string, status?: number) {
     super(message)
     this.code = code

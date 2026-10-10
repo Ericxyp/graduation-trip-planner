@@ -28,18 +28,28 @@ async function main() {
   const sql = neon(url)
   await sql.query(`CREATE TABLE IF NOT EXISTS schema_migrations (name VARCHAR(120) PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
   const done = new Set(((await sql.query(`SELECT name FROM schema_migrations`)) as { name: string }[]).map((r) => r.name))
-  const dir = join(process.cwd(), 'db', 'migrations')
+  // 默认执行 db/migrations/*.sql；--post-deploy 执行 db/migrations/post-deploy/*.sql（生产已切换到新代码后再跑）
+  const postDeploy = process.argv.includes('--post-deploy')
+  const dryRun = process.argv.includes('--dry-run')
+  const sub = postDeploy ? 'post-deploy' : ''
+  const dir = join(process.cwd(), 'db', 'migrations', sub)
   const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
   for (const f of files) {
-    if (done.has(f)) {
-      console.log(`· 跳过 ${f}（已执行）`)
+    const name = sub ? `${sub}/${f}` : f
+    if (done.has(name)) {
+      console.log(`· 跳过 ${name}（已执行）`)
       continue
     }
     const stmts = splitSql(readFileSync(join(dir, f), 'utf8'))
-    await sql.transaction([...stmts.map((s) => sql.query(s)), sql.query(`INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING`, [f])])
-    console.log(`✓ 已执行 ${f}（${stmts.length} 条语句）`)
+    if (dryRun) {
+      console.log(`○ 待执行 ${name}（${stmts.length} 条语句）`)
+      continue
+    }
+    // 每个文件在一个事务中执行；文件本身幂等，失败可安全重试
+    await sql.transaction([...stmts.map((s) => sql.query(s)), sql.query(`INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name])])
+    console.log(`✓ 已执行 ${name}（${stmts.length} 条语句）`)
   }
-  console.log('迁移完成')
+  console.log(dryRun ? '预检完成（未写入）' : '迁移完成')
 }
 
 if (process.argv[1] && /migrate\.ts$/.test(process.argv[1])) {

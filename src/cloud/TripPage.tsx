@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, Crown, Link2, Lock, PenLine, Plane, ShieldCheck, Trash2, UserPlus, Wallet, X } from 'lucide-react'
+import { Check, Copy, Crown, Link2, Lock, LogOut, PenLine, Plane, ShieldCheck, Trash2, UserPlus, Wallet, X } from 'lucide-react'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
 import PreferenceSheet from '../components/PreferenceSheet'
@@ -8,9 +8,11 @@ import type { MyPrefs } from '../types'
 import { linkProps } from '../router'
 import { fmtMonthDay, rangeDays } from '../shared/dates'
 import { profileOf } from '../shared/destinations'
-import type { Preferences, TripView } from '../shared/types'
-import { api, ApiClientError } from './api'
-import { clearIdentity, loadIdentity, loadInviteCode, loadSnapshot, takeFlag } from './storage'
+import type { LeaveSummary, Preferences, TripView } from '../shared/types'
+import { api, ApiClientError, type ExpenseInput } from './api'
+import { clearIdentity, loadIdentity, loadInviteCode, loadSeenActivity, loadSnapshot, saveInviteCode, saveSeenActivity, takeFlag, takeRecoveryCode } from './storage'
+import { ActivitySection, AdminPanel, InviteStatusBadge, LeaveConfirm, LeaveFeedbackCard, RecoveryCodeDialog, StageNav } from './Collab'
+import { LedgerSection } from './Ledger'
 import { useTripSync } from './sync'
 import { ConsensusSection, ItinerarySection, SettleSection } from './TripSections'
 import { CloudHeader, MemberDot, PageSkeleton, StateCard, SyncPill } from './ui'
@@ -21,13 +23,18 @@ const toSheet = (p: Preferences | null): MyPrefs | null =>
 export default function TripPage({ slug }: { slug: string }) {
   const toast = useToast()
   const [identity, setIdentity] = useState(() => loadIdentity(slug))
-  const { view, status, error, lastSynced, refresh, apply } = useTripSync(slug, identity?.memberToken ?? null)
+  const { view, status, error, lastSynced, refresh, apply } = useTripSync(slug, identity?.memberToken ?? null, () => setIdentity(loadIdentity(slug)))
   const [sheetOpen, setSheetOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const flagsHandled = useRef(false)
+  const [leaveOpen, setLeaveOpen] = useState(false)
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null)
+  const [inviteAfterRecovery, setInviteAfterRecovery] = useState(false)
+  const [leaveFeedback, setLeaveFeedback] = useState<LeaveSummary | null>(null)
+  const [leftSummary, setLeftSummary] = useState<{ summary: LeaveSummary | null; name: string } | null>(null)
 
   const readOnly = status === 'snapshot' || (status === 'error' && !!error && error.code !== 'VERSION_CONFLICT')
 
@@ -35,13 +42,31 @@ export default function TripPage({ slug }: { slug: string }) {
   useEffect(() => {
     if (!view || flagsHandled.current) return
     flagsHandled.current = true
-    if (takeFlag(slug, 'created')) setInviteOpen(true)
-    else if (takeFlag(slug, 'open-prefs') && !view.me.preferences) setSheetOpen(true)
+    if (takeFlag(slug, 'created')) {
+      // 先一次性展示恢复码，保存后再弹出邀请
+      const code = takeRecoveryCode(slug)
+      if (code) {
+        setRecoveryCode(code)
+        setInviteAfterRecovery(true)
+      } else setInviteOpen(true)
+    } else if (takeFlag(slug, 'open-prefs') && !view.me.preferences) setSheetOpen(true)
   }, [view, slug])
 
-  // 身份失效：清掉本地身份，引导重新加入
+  // 新的“成员退出/被移除”动态：给其他成员展示变化反馈（首次进入只记录已读位置，不回放历史）
   useEffect(() => {
-    if (error?.code === 'UNAUTHORIZED') {
+    if (!view) return
+    const latest = view.activity[0]?.id ?? 0
+    const seen = loadSeenActivity(slug)
+    if (seen && latest > seen) {
+      const ev = view.activity.find((a) => a.id > seen && (a.type === 'member_left' || a.type === 'member_removed') && a.leave)
+      if (ev?.leave) setLeaveFeedback(ev.leave)
+    }
+    if (latest > seen) saveSeenActivity(slug, latest)
+  }, [view, slug])
+
+  // 身份失效或已退出：清掉本地身份，引导重新加入
+  useEffect(() => {
+    if (error?.code === 'UNAUTHORIZED' || error?.code === 'MEMBER_LEFT') {
       clearIdentity(slug)
       setIdentity(null)
     }
@@ -59,24 +84,61 @@ export default function TripPage({ slug }: { slug: string }) {
   )
 
   /** 统一处理写操作：成功直接应用服务端返回的最新视图；版本冲突则刷新后提示重试 */
-  async function mutate(key: string, fn: (token: string) => Promise<TripView>, success?: (v: TripView) => void) {
-    if (!identity || busy) return
+  async function mutate(key: string, fn: (token: string) => Promise<TripView>, success?: (v: TripView) => void): Promise<boolean> {
+    if (!identity || busy) return false
     setBusy(key)
+    const beforeId = view?.activity[0]?.id ?? 0
     try {
       const v = await fn(identity.memberToken)
-      apply(v)
+      apply(v, { local: true })
       success?.(v)
+      return true
     } catch (e) {
       const err = e as ApiClientError
       if (err.code === 'VERSION_CONFLICT') {
-        await refresh()
-        toast({ kind: 'info', title: '数据已被其他成员更新', desc: '已为你刷新到最新状态，请再操作一次' })
+        // 不静默覆盖：拉取最新状态，并告诉用户期间发生了什么
+        const fresh = await refresh()
+        const changes = (fresh?.activity ?? []).filter((a) => a.id > beforeId).map((a) => a.text)
+        toast({ kind: 'info', title: '数据已被其他成员更新，你的修改没有生效', desc: changes.length ? `期间：${changes.slice(0, 2).join('；')}。请确认后再操作一次` : '已刷新到最新状态，请确认后再操作一次' })
       } else toast({ kind: 'error', title: '操作失败', desc: err.message })
+      return false
     } finally {
       setBusy(null)
     }
   }
 
+  async function leaveTrip() {
+    if (!identity) return
+    setBusy('leave')
+    try {
+      const r = await api.leave(slug, identity.memberToken)
+      const name = view?.me.displayName ?? ''
+      clearIdentity(slug)
+      setLeftSummary({ summary: r.summary, name })
+      setIdentity(null)
+      toast({ kind: 'success', title: '你已退出旅行局' })
+    } catch (e) {
+      toast({ kind: 'error', title: '退出失败', desc: (e as ApiClientError).message })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!identity && leftSummary) {
+    const s = leftSummary.summary
+    return (
+      <div className="min-h-screen">
+        <CloudHeader />
+        <main className="px-4">
+          <StateCard icon="ok" title="你已退出这个旅行局" desc={s ? `参加人数 ${s.countBefore} → ${s.countAfter}，人均 ¥${s.perPersonBefore.toLocaleString('zh-CN')} → ¥${s.perPersonAfter.toLocaleString('zh-CN')}${s.reassigned ? `，${s.reassigned} 项任务已交给其他成员` : ''}。你的历史垫付仍保留在台账中。` : '你的历史垫付仍保留在台账中。'}>
+            <a {...linkProps('/')} className="btn-ghost px-5 py-2.5 text-sm">
+              返回示例旅行局
+            </a>
+          </StateCard>
+        </main>
+      </div>
+    )
+  }
   if (!identity) {
     return (
       <div className="min-h-screen">
@@ -85,6 +147,9 @@ export default function TripPage({ slug }: { slug: string }) {
           <StateCard title="你还没有加入这个旅行局" desc={loadSnapshot(slug) ? '当前浏览器的成员身份已失效，请用邀请码重新加入。' : '需要发起人提供的邀请码才能查看旅行局的共享信息。'}>
             <a {...linkProps(`/trip/${slug}/join`)} className="btn-primary px-5 py-2.5 text-sm">
               使用邀请码加入
+            </a>
+            <a {...linkProps(`/trip/${slug}/recover`)} className="btn-ghost px-5 py-2.5 text-sm">
+              我是发起人，找回身份
             </a>
             <a {...linkProps('/')} className="btn-ghost px-5 py-2.5 text-sm">
               体验示例旅行局
@@ -122,6 +187,26 @@ export default function TripPage({ slug }: { slug: string }) {
 
   const { trip, me } = view
   const isOrganizer = me.role === 'organizer'
+  const archived = trip.status === 'archived'
+
+  async function mutateInvite(body: Parameters<typeof api.updateInvite>[2], okText: string) {
+    if (!identity || busy) return
+    setBusy('invite')
+    try {
+      const r = await api.updateInvite(slug, identity.memberToken, body)
+      apply(r.view, { local: true })
+      if (r.invite) saveInviteCode(slug, r.invite.code)
+      toast({ kind: 'success', title: okText })
+    } catch (e) {
+      const err = e as ApiClientError
+      if (err.code === 'VERSION_CONFLICT') {
+        await refresh()
+        toast({ kind: 'info', title: '邀请设置刚被更新', desc: '已刷新到最新状态，请确认后再操作' })
+      } else toast({ kind: 'error', title: '操作失败', desc: err.message })
+    } finally {
+      setBusy(null)
+    }
+  }
   const hasMine = !!me.preferences
   const fillPct = trip.memberCount ? Math.round((view.filledCount / trip.memberCount) * 100) : 0
 
@@ -159,6 +244,13 @@ export default function TripPage({ slug }: { slug: string }) {
       />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6">
+        <StageNav view={view} />
+        {view.trip.status === 'archived' && (
+          <p className="mt-4 rounded-2xl bg-cream-200 p-4 text-sm text-ink-600" role="status">
+            发起人已解散这个旅行局，所有内容只能查看。
+          </p>
+        )}
+        {leaveFeedback && <LeaveFeedbackCard s={leaveFeedback} onClose={() => setLeaveFeedback(null)} />}
         {readOnly && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-coral-50 p-4 text-sm text-coral-700 ring-1 ring-coral-200" role="alert">
             <span className="flex-1">{status === 'snapshot' ? '云端连接失败，正在使用本地只读快照。' : '云端连接失败，当前显示的是最近一次同步的数据，暂时不能修改。'}</span>
@@ -296,12 +388,47 @@ export default function TripPage({ slug }: { slug: string }) {
           </ul>
           <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-cream-100 p-4 sm:flex-row sm:items-center">
             <p className="flex-1 text-[13px] leading-6 text-ink-500">成员只能看到彼此的填写状态。预算、必选条件和底线条件仅用于服务端匹配，不会返回给任何其他成员。</p>
-            <button onClick={() => setSheetOpen(true)} disabled={readOnly} className="btn-dark shrink-0 px-4 py-2.5 text-sm">
+            <button onClick={() => setSheetOpen(true)} disabled={readOnly || archived} className="btn-dark shrink-0 px-4 py-2.5 text-sm">
               <PenLine className="h-4 w-4" />
               {hasMine ? '修改我的偏好' : '填写我的偏好'}
             </button>
           </div>
+          {!archived && (
+            <div className="mt-3 flex justify-end">
+              <button onClick={() => setLeaveOpen(true)} disabled={readOnly || busy === 'leave'} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-ink-500 hover:bg-cream-100 hover:text-coral-700">
+                <LogOut className="h-3.5 w-3.5" />
+                {busy === 'leave' ? '正在退出…' : '退出旅行局'}
+              </button>
+            </div>
+          )}
         </section>
+
+        {isOrganizer && view.admin && (
+          <AdminPanel
+            view={view}
+            busy={!!busy}
+            readOnly={readOnly}
+            onInvite={(action) =>
+              mutateInvite(action === 'regenerate' ? { action, expectedInviteVersion: view.admin!.inviteVersion } : { action, expectedInviteVersion: view.admin!.inviteVersion }, action === 'regenerate' ? '新邀请码已生效，旧邀请码已失效' : action === 'pause' ? '已暂停邀请' : '已恢复邀请')
+            }
+            onDeadline={(iso) => mutateInvite({ action: 'deadline', inviteDeadline: iso, expectedInviteVersion: view.admin!.inviteVersion }, iso ? '邀请截止时间已更新' : '已取消截止时间')}
+            onResetRecovery={async () => {
+              if (!identity) return
+              setBusy('recovery')
+              try {
+                const r = await api.resetRecoveryCode(slug, identity.memberToken)
+                setRecoveryCode(r.recovery.code)
+                refresh()
+              } catch (e) {
+                toast({ kind: 'error', title: '生成失败', desc: (e as ApiClientError).message })
+              } finally {
+                setBusy(null)
+              }
+            }}
+            onTransfer={(m) => mutate('transfer', (t) => api.transferOrganizer(slug, t, m.id), () => toast({ kind: 'success', title: `已把发起人转让给${m.displayName}`, desc: '你现在是普通成员，可以选择退出' }))}
+            onArchive={() => mutate('archive', (t) => api.archive(slug, t), () => toast({ kind: 'info', title: '旅行局已解散' }))}
+          />
+        )}
 
         <ConsensusSection
           consensus={view.consensus}
@@ -345,8 +472,28 @@ export default function TripPage({ slug }: { slug: string }) {
           onTogglePaid={(paid) => mutate('paid', (t) => api.setPaid(slug, t, paid, view.state.version), () => toast({ kind: 'success', title: paid ? '已记录你的付款' : '已撤销付款记录' }))}
         />
 
+        <LedgerSection
+          ledger={view.ledger}
+          members={view.members}
+          participants={view.lockedPlan?.participants.map((x) => x.id) ?? []}
+          meId={me.memberId}
+          locked={!!view.lockedPlan}
+          readOnly={readOnly || archived}
+          busy={busy === 'expense'}
+          onSave={(input: ExpenseInput, editing) =>
+            mutate(
+              'expense',
+              (t) => (editing ? api.updateExpense(slug, t, editing.id, { ...input, expectedVersion: editing.version }) : api.createExpense(slug, t, input)),
+              () => toast({ kind: 'success', title: editing ? '费用已更新' : '已记入台账', desc: '每人收支与转账建议已重新计算' }),
+            )
+          }
+          onDelete={(e) => mutate('expense', (t) => api.deleteExpense(slug, t, e.id, e.version), () => toast({ kind: 'info', title: `已删除费用「${e.title}」` }))}
+        />
+
+        <ActivitySection items={view.activity} />
+
         <footer className="mt-16 border-t border-dashed border-cream-300 py-8 text-center text-xs leading-6 text-ink-400">
-          共识方案由服务端规则引擎基于成员偏好计算生成，仅供决策参考 · 数据每 10 秒自动同步
+          共识方案由服务端规则引擎基于成员偏好计算生成，仅供决策参考 · 页面可见时每 5 秒自动同步
         </footer>
       </main>
 
@@ -385,6 +532,25 @@ export default function TripPage({ slug }: { slug: string }) {
         busy={busy === 'prefs'}
       />
       <CloudInvite open={inviteOpen} onClose={() => setInviteOpen(false)} slug={slug} trip={view} />
+      <RecoveryCodeDialog
+        code={recoveryCode}
+        onDone={() => {
+          setRecoveryCode(null)
+          if (inviteAfterRecovery) {
+            setInviteAfterRecovery(false)
+            setInviteOpen(true)
+          }
+        }}
+      />
+      <LeaveConfirm
+        open={leaveOpen}
+        isOrganizer={isOrganizer}
+        onCancel={() => setLeaveOpen(false)}
+        onConfirm={() => {
+          setLeaveOpen(false)
+          leaveTrip()
+        }}
+      />
       <ConfirmDialog
         open={!!removing}
         title={`移除成员「${removing?.name ?? ''}」？`}
@@ -432,6 +598,16 @@ function CloudInvite({ open, onClose, slug, trip }: { open: boolean; onClose: ()
           </p>
         </div>
         <div className="p-6 pb-[max(24px,env(safe-area-inset-bottom))]">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <span className="text-xs text-ink-500">邀请状态</span>
+            <InviteStatusBadge status={trip.trip.inviteStatus} />
+          </div>
+          {trip.trip.inviteStatus !== 'open' && (
+            <p className="mb-4 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800 ring-1 ring-amber-200">
+              {trip.trip.inviteStatus === 'paused' ? '邀请已暂停，同学暂时无法通过链接加入。' : trip.trip.inviteStatus === 'expired' ? '邀请已过期，同学暂时无法加入。' : trip.trip.inviteStatus === 'full' ? '人数已满，无法再加入新成员。' : '旅行局已解散。'}
+              {trip.me.role === 'organizer' && trip.trip.inviteStatus !== 'closed' ? '可在“发起人管理”中调整。' : ''}
+            </p>
+          )}
           {code ? (
             <div className="flex items-center justify-between rounded-2xl bg-cream-100 px-4 py-3 ring-1 ring-cream-300">
               <span className="text-xs text-ink-500">邀请码</span>

@@ -1,5 +1,5 @@
 /** 浏览器端 API 客户端：只调用同源 /api/*，不接触任何数据库或密钥 */
-import type { ApiErrorCode, CreateTripInput, CreateTripResult, HealthView, JoinTripResult, Preferences, PublicTrip, TripView } from '../shared/types'
+import type { ApiErrorCode, CreateTripInput, CreateTripResult, HealthView, JoinTripResult, LeaveResult, Preferences, PublicTrip, TripView } from '../shared/types'
 
 export class ApiClientError extends Error {
   code: ApiErrorCode | 'NETWORK' | 'BAD_RESPONSE'
@@ -72,4 +72,27 @@ export const api = {
   setTask: (slug: string, token: string, key: string, done: boolean, expectedVersion: number) => request<TripView>('PATCH', `/trips/${slug}/state`, { token, body: { op: 'task', key, done, expectedVersion } }),
   setPaid: (slug: string, token: string, paid: boolean, expectedVersion: number) => request<TripView>('PATCH', `/trips/${slug}/state`, { token, body: { op: 'paid', paid, expectedVersion } }),
   removeMember: (slug: string, token: string, memberId: string) => request<TripView>('DELETE', `/trips/${slug}/members/${memberId}`, { token }),
+  /* 阶段三 */
+  leave: (slug: string, token: string) => request<LeaveResult>('POST', `/trips/${slug}/leave`, { token, body: {} }),
+  transferOrganizer: (slug: string, token: string, memberId: string) => request<TripView>('POST', `/trips/${slug}/transfer-organizer`, { token, body: { memberId } }),
+  archive: (slug: string, token: string) => request<TripView>('POST', `/trips/${slug}/archive`, { token, body: {} }),
+  /** 恢复码只放在请求体里，绝不放进 URL */
+  recoverOrganizer: (slug: string, recoveryCode: string) => request<JoinTripResult>('POST', `/trips/${slug}/recover-organizer`, { body: { recoveryCode } }),
+  resetRecoveryCode: (slug: string, token: string) => request<{ recovery: { code: string } }>('POST', `/trips/${slug}/recovery-code`, { token, body: {} }),
+  updateInvite: (slug: string, token: string, body: InviteAction) => request<{ view: TripView; invite: { code: string; url: string } | null }>('PATCH', `/trips/${slug}/invite`, { token, body }),
+  createExpense: (slug: string, token: string, body: ExpenseInput) => request<TripView>('POST', `/trips/${slug}/expenses`, { token, body }),
+  updateExpense: (slug: string, token: string, id: string, body: ExpenseInput & { expectedVersion: number }) => request<TripView>('PATCH', `/trips/${slug}/expenses/${id}`, { token, body }),
+  deleteExpense: (slug: string, token: string, id: string, expectedVersion: number) => request<TripView>('DELETE', `/trips/${slug}/expenses/${id}`, { token, body: { expectedVersion } }),
+}
+
+export type InviteAction =
+  | { action: 'regenerate' | 'pause' | 'resume'; expectedInviteVersion: number }
+  | { action: 'deadline'; inviteDeadline: string | null; expectedInviteVersion: number }
+
+export interface ExpenseInput {
+  title: string
+  category: string
+  amountCents: number
+  paidBy: string
+  split: { splitMethod: 'equal_all' } | { splitMethod: 'equal_selected'; memberIds: string[] } | { splitMethod: 'custom'; shares: { memberId: string; shareCents: number }[] }
 }

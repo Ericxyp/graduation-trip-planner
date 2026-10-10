@@ -9,9 +9,11 @@
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
-    "test": "tsx --test tests/*.test.ts",
-    "test:api": "tsx --test tests/api.test.ts",
-    "db:migrate": "tsx scripts/migrate.ts"
+    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:api": "tsx --test --test-concurrency=1 tests/api.test.ts tests/stage3.api.test.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate:post-deploy": "tsx scripts/migrate.ts --post-deploy",
+    "db:migrate:check": "tsx scripts/migrate.ts --dry-run"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",

@@ -54,9 +54,20 @@ tests/                      单元测试 + API 集成测试
 | PUT | `/api/trips/:slug/preferences/me` | 成员 | 新增/修改**自己的**偏好 |
 | PATCH | `/api/trips/:slug/state` | 成员 | `op: task`（负责人或发起人）/ `op: paid`（只能改自己），需 `expectedVersion` |
 | POST | `/api/trips/:slug/lock` | 发起人 | 锁定/解锁团队方案，需 `expectedVersion` |
-| DELETE | `/api/trips/:slug/members/:id` | 发起人 | 移除成员 |
+| DELETE | `/api/trips/:slug/members/:id` | 发起人 | 移除成员（阶段三起为软删除，并触发重算） |
+| POST | `/api/trips/:slug/leave` | 成员 | 主动退出（发起人不可直接退出；重复调用幂等返回 `already_left`） |
+| POST | `/api/trips/:slug/transfer-organizer` | 发起人 | 转让发起人身份 `{ memberId }`，同时清除旧恢复码 |
+| POST | `/api/trips/:slug/archive` | 发起人 | 解散旅行局（只读） |
+| POST | `/api/trips/:slug/recover-organizer` | 恢复码（数据库级限流） | 请求体 `{ recoveryCode }`，签发新的发起人会话，旧 token 保持有效 |
+| POST | `/api/trips/:slug/recovery-code` | 发起人 | 生成/重新生成恢复码（只返回一次，旧码失效） |
+| PATCH | `/api/trips/:slug/invite` | 发起人 | `action: regenerate / pause / resume / deadline`，需 `expectedInviteVersion` |
+| GET | `/api/trips/:slug/expenses` | 成员 | 实际费用台账（明细、每人收支、最少转账） |
+| POST | `/api/trips/:slug/expenses` | 成员（方案锁定后） | 新增费用 |
+| PATCH / DELETE | `/api/trips/:slug/expenses/:id` | 记录人 / 垫付人 / 发起人 | 修改（需 `expectedVersion`）/ 软删除 |
 
-错误统一为 `{ "error": { "code", "message" } }`，code 包括 `INVALID_INPUT / UNAUTHORIZED / FORBIDDEN / TRIP_NOT_FOUND / INVALID_INVITE_CODE / INVITE_EXPIRED / MEMBER_LIMIT_REACHED / DISPLAY_NAME_TAKEN / VERSION_CONFLICT / RATE_LIMITED / NOT_CONFIGURED / DATABASE_UNAVAILABLE / INTERNAL_ERROR` 等。
+错误统一为 `{ "error": { "code", "message" } }`，code 包括 `INVALID_INPUT / UNAUTHORIZED / FORBIDDEN / TRIP_NOT_FOUND / INVALID_INVITE_CODE / INVITE_EXPIRED / INVITE_PAUSED / MEMBER_LIMIT_REACHED / DISPLAY_NAME_TAKEN / VERSION_CONFLICT / RATE_LIMITED / MEMBER_LEFT / ORGANIZER_CANNOT_LEAVE / INVALID_RECOVERY_CODE / EXPENSE_NOT_FOUND / NOT_LOCKED / TRIP_ARCHIVED / NOT_CONFIGURED / DATABASE_UNAVAILABLE / INTERNAL_ERROR`。429 带 `Retry-After`。
+
+阶段三对阶段二客户端完全向后兼容：所有旧接口与旧字段保留，`TripView` 只新增 `admin / ledger / activity`，`PublicTrip` 只新增 `inviteStatus`。
 
 ### 数据库表
 
@@ -66,7 +77,26 @@ tests/                      单元测试 + API 集成测试
 - `trip_state`：共享状态（选中/锁定方案、任务、付款、退出成员、`version` 乐观锁）
 - `schema_migrations`：迁移记录
 
-所有外键 `ON DELETE CASCADE`；迁移脚本幂等，可重复执行。
+阶段三（`db/migrations/002_stage_three.sql`，幂等，不修改 001，不删除数据）：
+
+- `members.left_at`：软删除；新增**部分唯一索引** `(trip_id, display_name) WHERE left_at IS NULL`（活跃成员昵称唯一）。为保证线上阶段二代码不受影响，002 **保留**阶段二的全表昵称约束；生产切换到阶段三代码后再执行部署后迁移 `db/migrations/post-deploy/003_drop_legacy_name_unique.sql`（`npm run db:migrate:post-deploy`），之后退出者不再占用昵称
+- `trips`：`recovery_code_hash`、`invite_paused`、`invite_version`（邀请设置乐观锁）、`revision`（全局修订号）
+- `trip_state.assignments`：锁定时固化的任务负责人（key → memberId）
+- `member_sessions`：多设备会话（发起人恢复后新增，`token_hash` 唯一，可单独吊销）
+- `expenses` / `expense_shares`：整数“分”，金额 1–10,000,000 分，类别/分摊方式 CHECK，软删除 `deleted_at`，`version` 乐观锁
+- `activity_events`：动态（只存白名单字段的脱敏摘要）
+- `rate_limits`：持久化限流（`bucket_key` 为 HMAC 值）
+
+所有外键 `ON DELETE CASCADE`（动态的操作人 `ON DELETE SET NULL`）；`npm run db:migrate` 按文件名顺序执行全部迁移，已执行的记录在 `schema_migrations`。
+
+**兼容性与回滚说明（不会自动执行）**：
+
+- 已验证：阶段二代码（e715a84）的全部 API 测试在执行过 001 + 002 的数据库上通过，因此可以先迁移、再部署 Preview，生产环境的阶段二代码不受影响。
+- 注意：阶段二代码不认识 `left_at`。在共用数据库上，Preview 中退出的成员在阶段二生产环境里仍显示为成员（仅影响在 Preview 中操作过的旅行局）。
+- 代码回滚到阶段二：只要**没有执行**部署后迁移 003，直接回滚即可，新增列与表不影响旧版本。
+- 若已执行 003 又要回滚到阶段二：需手动恢复约束（先确认同一旅行局内没有重名成员）：
+  `ALTER TABLE members ADD CONSTRAINT members_trip_name_unique UNIQUE (trip_id, display_name);`
+- 彻底移除阶段三数据（破坏性，仅在确认不需要时手动执行）：`DROP TABLE rate_limits, activity_events, expense_shares, expenses, member_sessions;` 并 `ALTER TABLE ... DROP COLUMN` 对应新增列。
 
 ### 身份、权限与隐私
 
@@ -75,7 +105,11 @@ tests/                      单元测试 + API 集成测试
 - 请求通过 `Authorization: Bearer <memberToken>` 认证，服务端按哈希查成员记录确定身份与角色；**从不信任客户端传入的 role 或 memberId**（请求体用 zod `.strict()` 拒绝未知字段）。
 - 邀请链接形如 `/trip/<slug>/join#code=XXXX`：邀请码在 URL fragment 中，浏览器不会发给服务器，因此不会进入访问日志；加入页读取后立即从地址栏移除。
 - **不会返回给其他成员的字段**：预算档位、必选条件、不能接受条件、可出发日期原文、任何 token/邀请码哈希。共识结果只包含聚合计数（例如“2人的预算上限被超出”）和查看者本人的得分。
-- 日志只记录接口与错误类别，不记录 token、邀请码、偏好或 SQL。
+- 日志只记录接口与错误类别，不记录 token、邀请码、恢复码、偏好或 SQL。
+- **成员退出**：软删除（`left_at`），立即吊销其全部会话（旧 token 返回 401 `MEMBER_LEFT`）；偏好不再参与共识；历史费用记录保留。
+- **发起人恢复**：创建时生成 16 位恢复码（只显示一次，数据库存 HMAC）。恢复码只通过 POST 请求体发送，不进 URL。恢复成功后新增一个会话，**旧设备 token 保持有效**；转让发起人时恢复码自动失效。
+- **持久化限流**（`server/limits.ts`，存 Postgres，跨实例）：创建 10 次/10 分钟/IP；加入 10 次/10 分钟/(IP, 旅行局) 且 60 次/10 分钟/旅行局；恢复 5 次/15 分钟/(IP, 旅行局) 且 20 次/小时/旅行局；重新生成邀请码 10 次/小时/旅行局。key 为 `HMAC(TOKEN_PEPPER, scope+标识)`，表中不出现原始 IP；过期记录随请求抽样清理（`expires_at < now() - 1h`）。另保留一层进程内预过滤，减轻洪泛时的数据库压力。
+- **操作记录脱敏**：每种事件有字段白名单（`src/shared/activity.ts`），写入前过滤，只保存昵称、目的地、费用标题与金额、计数；绝不保存偏好内容、token、邀请码或恢复码。文案在服务端渲染，例如“糖糖新增费用“毕业晚宴 ¥680””。
 
 ### 共识算法（服务端权威）
 
@@ -83,9 +117,24 @@ tests/                      单元测试 + API 集成测试
 2. 解释层：用规则模板把上面的数字转成推荐理由、冲突与说明，不调用大模型。
 3. 锁定的方案以 id（`开始日期|天数|目的地`）保存；成员之后修改偏好，锁定的目的地和日期不变，人数与费用会按最新偏好重新计算。
 
+### 成员退出后的重算规则
+
+1. 已锁定方案：目的地与日期**不变**，参加人数、人均费用按剩余成员重新计算；未锁定：共识方案整体重算。
+2. 任务：只把退出者名下的任务重新分配给“当前任务最少的参加成员”（平局按加入顺序），其他人的任务负责人不变。
+3. 实际费用：已记录的费用与分摊**不自动删除**，退出者在“每人收支”中以“已退出”保留，转账建议照常包含其应收/应补。
+4. 并发：退出在同一事务中先锁 `trip_state` 行，再以 `version` 条件写入成员状态、任务分配、版本与动态；版本变化时服务端自动重算并重试（最多 4 次）。
+5. 其他成员下次同步时看到变化反馈卡：“糖糖已退出旅行局 · 参加人数 3 → 2 · 人均 ¥2,863 → ¥2,790 · 4 项任务已重新分配 · 成都方案保持锁定”。
+
+### 费用分摊算法
+
+- 金额全程使用整数“分”；输入的“186.5”按字符串解析为 18650，不经过浮点数。
+- 均摊：`base = ⌊总额 / 人数⌋`，余下的 r 分按加入顺序给前 r 人（每人至多多 1 分），合计恒等于总额。
+- 自定义：服务端校验每人金额之和必须等于总额，成员必须是当前旅行局的活跃成员。
+- 每人净额 = 垫付合计 − 应承担合计；最少转账采用贪心：每次让应补最多的人转给应收最多的人，金额取两者较小值，每步至少结清一人，因此笔数 ≤ 有余额人数 − 1（平局按 id 排序，结果确定）。
+
 ### 多人同步
 
-可见时每 10 秒轮询一次 `GET /api/trips/:slug`；窗口重新获得焦点或网络恢复时立即刷新；请求进行中不重复发起；后台标签页暂停轮询。写操作直接使用服务端返回的最新数据。响应携带单调递增的 `revision`，旧响应会被丢弃。网络或服务端故障时显示“同步失败/离线快照”，以只读方式展示最近一次成功的数据。写冲突返回 409，前端自动刷新并提示重试。
+页面可见时每 5 秒轮询 `GET /api/trips/:slug`，隐藏时降为 30 秒；窗口获得焦点、网络恢复、其他标签页广播（BroadcastChannel，只传 slug 与信号类型）时立即刷新；请求进行中不重复发起。`revision = trips.revision + trip_state.version`，未变化时不替换数据、不重渲染列表，更旧的响应直接丢弃。状态显示：已同步 / 正在同步 / 网络断开 / 本地只读快照 / 同步失败。写冲突（409）时自动拉取最新状态，并用最近动态告诉用户期间发生了什么，不静默覆盖。未使用 SSE/WebSocket：在当前环境无法可靠验证 Vercel 上的长连接，轮询更可控。
 
 ## 环境变量
 
@@ -103,7 +152,8 @@ Vercel 中三个环境（Production / Preview / Development）分别配置：Pro
 npm install
 cp .env.example .env.local        # 或 vercel env pull .env.local
 # 填写 DATABASE_URL（建议用 Neon 的开发分支）与 TOKEN_PEPPER
-npm run db:migrate
+npm run db:migrate:check          # 预检：列出待执行的迁移（不执行）
+npm run db:migrate                # 执行 db/migrations/*.sql（001、002）
 npx vercel dev                    # 同时运行前端与 /api（推荐）
 ```
 
@@ -113,7 +163,8 @@ npx vercel dev                    # 同时运行前端与 /api（推荐）
 ### 测试
 
 - `npm test`：单元测试（不需要数据库）。`TEST_DATABASE_URL` 设置后会同时运行 API 集成测试。
-- 集成测试会**清空并重建**测试库，因此只允许 `localhost`，或在显式设置 `ALLOW_TEST_DB_RESET=1` 时使用一次性的 Neon 测试分支。绝不要指向生产库。
+- `tests/api.test.ts` 会**清空并重建**测试库，因此只允许 host 为 `localhost / 127.0.0.1 / ::1` 且库名包含 `test` 的本机库；其他地址（包括任何 Neon 连接）整组自动跳过。`tests/stage3.api.test.ts` 不删除任何表，只幂等执行迁移后创建新的旅行局。
+- 测试文件串行执行（`--test-concurrency=1`），避免两组集成测试同时操作同一个库。
 
 ```bash
 TEST_DATABASE_URL=postgres://dev:dev@localhost:5432/gradtrip_test npm test
@@ -128,6 +179,7 @@ TEST_DATABASE_URL=postgres://dev:dev@localhost:5432/gradtrip_test npm test
 5. 确认 `/api/health` 返回 `{"status":"ok"}`，并确认其他成员的响应中没有预算与底线。
 6. 对生产数据库执行迁移：`DATABASE_URL=<生产连接串> npm run db:migrate`（脚本会先打印目标主机）。
 7. 合并到 main（或 `vercel --prod`），验证 https://biye-dazi-ju.vercel.app 。
+8. 阶段三上线并验证后，再执行部署后迁移：`npm run db:migrate:post-deploy`（放开已退出成员占用的昵称）。
 
 ### 回滚
 
@@ -136,8 +188,8 @@ TEST_DATABASE_URL=postgres://dev:dev@localhost:5432/gradtrip_test npm test
 
 ## 已知限制
 
-- 限流是函数实例内存计数，不是多实例强一致限流；生产化应改用 Redis/KV。
-- 身份只保存在浏览器 localStorage，换设备或清除数据后需要重新加入（同名会被拒绝，需由发起人移除旧身份）。
+- 限流为数据库固定窗口计数（跨实例），高并发下会给数据库带来额外写入；更大规模应改用 Redis/KV。同一出口 IP（校园网 NAT）共享额度。
+- 普通成员的身份只保存在浏览器 localStorage，换设备后需要重新加入（发起人可用恢复码找回；普通成员暂无恢复码）。
 - 同步采用 10 秒轮询，不是实时推送。
 - 目的地费用为确定性估算，不是实时报价；未收录城市使用通用画像并在方案中标注。
 - 任务/付款只做状态记录，没有真实支付；“成员退出重算”目前只在演示模式中提供。

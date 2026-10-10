@@ -11,6 +11,7 @@ const CreateTripPage = lazy(() => import('./cloud/CreateTripPage'))
 const JoinTripPage = lazy(() => import('./cloud/JoinTripPage'))
 const TripPage = lazy(() => import('./cloud/TripPage'))
 const NotFoundPage = lazy(() => import('./cloud/NotFoundPage'))
+const RecoverPage = lazy(() => import('./cloud/RecoverPage'))
 
 function Root() {
   const route = useRoute()
@@ -20,6 +21,7 @@ function Root() {
       {route.name === 'create' && <CreateTripPage />}
       {route.name === 'join' && <JoinTripPage key={route.slug} slug={route.slug} />}
       {route.name === 'trip' && <TripPage key={route.slug} slug={route.slug} />}
+      {route.name === 'recover' && <RecoverPage key={route.slug ?? ''} slug={route.slug} />}
       {route.name === 'notfound' && <NotFoundPage />}
     </Suspense>
   )

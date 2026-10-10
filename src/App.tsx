@@ -15,6 +15,7 @@ import InviteDialog from './components/InviteDialog'
 import ConfirmDialog from './components/ConfirmDialog'
 import BottomBar from './components/BottomBar'
 import Footer from './components/Footer'
+import CloudCapabilities from './components/CloudCapabilities'
 import Onboarding from './components/Onboarding'
 import ChangeFeedback from './components/ChangeFeedback'
 import DemoPanel, { type DemoAction } from './components/DemoPanel'
@@ -256,6 +257,7 @@ export default function App() {
             toast({ kind: 'success', title: '已恢复全部成员' })
           }}
         />
+        <CloudCapabilities />
         <Footer onReset={() => setOverlay('reset')} onDemo={() => setOverlay('demo')} />
       </main>
 

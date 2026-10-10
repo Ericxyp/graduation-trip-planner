@@ -495,14 +495,14 @@ export function SettleSection(p: { plan: PlanView | null; isLocked: boolean; sta
     <section id="settle" className="pt-12 sm:pt-16" aria-labelledby="settle-title">
       <span className="section-eyebrow">
         <Wallet className="h-3.5 w-3.5" />
-        Split the bill
+        Budget estimate
       </span>
       <h2 id="settle-title" className="mt-2 text-2xl font-extrabold tracking-tight text-ink-900 sm:text-[28px]">
-        费用透明，AA 不尴尬
+        行程预算估算
       </h2>
       <p className="mt-2 text-sm text-ink-500">
         {plan.destination}方案 · 公共费用由 {plan.participantCount} 位参加成员均摊{plan.costEstimated ? ' · 费用为通用估算' : ''}
-        {!p.isLocked && '（锁定方案后生效）'}
+        {!p.isLocked && '（锁定方案后生效）'}。这是出发前的估算，真实花销请记在下方“实际费用台账”。
       </p>
       <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         {[

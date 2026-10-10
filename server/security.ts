@@ -26,7 +26,14 @@ export function newToken(): string {
   return randomBytes(32).toString('base64url')
 }
 
-export function hashSecret(secret: string, pepper: string, purpose: 'token' | 'invite'): string {
+/** 发起人恢复码：16 位（约 80 bit 熵），显示为 4×4 分组 */
+export function newRecoveryCode(): string {
+  return randomFrom(CODE_ALPHABET, 16)
+}
+
+export type SecretPurpose = 'token' | 'invite' | 'recovery'
+
+export function hashSecret(secret: string, pepper: string, purpose: SecretPurpose): string {
   return createHmac('sha256', `${purpose}:${pepper}`).update(secret).digest('hex')
 }
 
@@ -35,7 +42,7 @@ export function normalizeInviteCode(code: string): string {
 }
 
 /** 常量时间比较，避免通过响应时间猜测邀请码 */
-export function verifySecret(secret: string, expectedHash: string, pepper: string, purpose: 'token' | 'invite'): boolean {
+export function verifySecret(secret: string, expectedHash: string, pepper: string, purpose: SecretPurpose): boolean {
   const actual = Buffer.from(hashSecret(secret, pepper, purpose), 'hex')
   const expected = Buffer.from(expectedHash, 'hex')
   return actual.length === expected.length && timingSafeEqual(actual, expected)

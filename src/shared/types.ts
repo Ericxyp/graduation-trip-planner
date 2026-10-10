@@ -34,7 +34,11 @@ export interface PublicTrip {
   isFull: boolean
   status: TripStatus
   createdAt: string
+  /** 阶段三：邀请状态（open 开放 / paused 已暂停 / expired 已过期 / full 人数已满 / closed 已解散） */
+  inviteStatus: InviteStatus
 }
+
+export type InviteStatus = 'open' | 'paused' | 'expired' | 'full' | 'closed'
 
 export interface Identity {
   memberId: string
@@ -167,6 +171,57 @@ export interface TripView {
   /** 单调递增，用于丢弃过期的轮询响应 */
   revision: number
   serverTime: string
+  /** 阶段三：仅发起人可见的管理信息 */
+  admin: { inviteVersion: number; invitePaused: boolean; hasRecoveryCode: boolean } | null
+  ledger: LedgerView
+  activity: ActivityView[]
+}
+
+export interface ExpenseView {
+  id: string
+  title: string
+  category: string
+  amountCents: number
+  paidBy: { id: string; displayName: string; left: boolean }
+  splitMethod: 'equal_all' | 'equal_selected' | 'custom'
+  shares: { memberId: string; displayName: string; shareCents: number }[]
+  createdBy: string
+  createdAt: string
+  version: number
+  canEdit: boolean
+}
+
+export interface LedgerView {
+  enabled: boolean
+  totalCents: number
+  expenses: ExpenseView[]
+  balances: { memberId: string; displayName: string; left: boolean; paidCents: number; owedCents: number; netCents: number }[]
+  transfers: { from: string; fromName: string; to: string; toName: string; cents: number }[]
+}
+
+export interface ActivityView {
+  id: number
+  type: string
+  text: string
+  at: string
+  /** 成员退出事件附带的重算结果，用于其他成员看到变化反馈 */
+  leave?: LeaveSummary
+}
+
+export interface LeaveSummary {
+  name: string
+  countBefore: number
+  countAfter: number
+  perPersonBefore: number
+  perPersonAfter: number
+  reassigned: number
+  lockedDestination: string | null
+  planDestination: string | null
+}
+
+export interface LeaveResult {
+  status: 'left' | 'already_left'
+  summary: LeaveSummary | null
 }
 
 export interface CreateTripInput {
@@ -184,6 +239,8 @@ export interface CreateTripResult {
   trip: PublicTrip
   identity: Identity & { role: 'organizer' }
   invite: { code: string; url: string }
+  /** 阶段三：发起人恢复码，只在此响应中出现一次 */
+  recovery: { code: string }
 }
 
 export interface JoinTripResult {
@@ -208,6 +265,13 @@ export type ApiErrorCode =
   | 'DATABASE_UNAVAILABLE'
   | 'NOT_FOUND'
   | 'METHOD_NOT_ALLOWED'
+  | 'INVITE_PAUSED'
+  | 'TRIP_ARCHIVED'
+  | 'MEMBER_LEFT'
+  | 'ORGANIZER_CANNOT_LEAVE'
+  | 'INVALID_RECOVERY_CODE'
+  | 'EXPENSE_NOT_FOUND'
+  | 'NOT_LOCKED'
   | 'INTERNAL_ERROR'
 
 export interface ApiErrorBody {

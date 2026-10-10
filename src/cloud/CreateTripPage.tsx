@@ -5,7 +5,7 @@ import { navigate } from '../router'
 import { rangeDays } from '../shared/dates'
 import type { HealthView } from '../shared/types'
 import { api, ApiClientError } from './api'
-import { saveIdentity, saveInviteCode, setFlag } from './storage'
+import { saveIdentity, saveInviteCode, setFlag, stashRecoveryCode } from './storage'
 import { BackLink, CloudHeader, Field, inputCls } from './ui'
 
 const SUGGESTED = ['成都', '青岛', '长沙', '重庆', '西安', '厦门', '大理', '杭州']
@@ -98,6 +98,7 @@ export default function CreateTripPage() {
       })
       saveIdentity(r.trip.slug, r.identity)
       saveInviteCode(r.trip.slug, r.invite.code)
+      if (r.recovery?.code) stashRecoveryCode(r.trip.slug, r.recovery.code)
       setFlag(r.trip.slug, 'created')
       toast({ kind: 'success', title: '旅行局已创建', desc: '把邀请链接发给同学吧' })
       navigate(`/trip/${r.trip.slug}`)

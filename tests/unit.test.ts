@@ -140,7 +140,7 @@ describe('多成员共识计算', () => {
   })
 
   it('公开成员摘要只包含昵称、角色与填写状态', () => {
-    const s = toMemberSummary({ id: 'x', trip_id: 't', display_name: '小林', role: 'organizer', color: '#fff', joined_at: '2026-01-01T00:00:00.000Z', prefs: P({ budgetId: 'b5' }) })
+    const s = toMemberSummary({ id: 'x', trip_id: 't', display_name: '小林', role: 'organizer', color: '#fff', joined_at: '2026-01-01T00:00:00.000Z', left_at: null, prefs: P({ budgetId: 'b5' }) })
     assert.deepEqual(Object.keys(s).sort(), ['color', 'displayName', 'hasPreferences', 'id', 'joinedAt', 'role'])
     assert.equal(s.hasPreferences, true)
   })

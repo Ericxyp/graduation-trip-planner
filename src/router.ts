@@ -6,14 +6,18 @@ export type Route =
   | { name: 'create' }
   | { name: 'trip'; slug: string }
   | { name: 'join'; slug: string }
+  | { name: 'recover'; slug?: string }
   | { name: 'notfound' }
 
 export function parseRoute(pathname: string): Route {
   const p = pathname.replace(/\/+$/, '') || '/'
   if (p === '/') return { name: 'demo' }
   if (p === '/create') return { name: 'create' }
+  if (p === '/recover') return { name: 'recover' }
   let m = /^\/trip\/([a-z0-9]{6,32})\/join$/.exec(p)
   if (m) return { name: 'join', slug: m[1] }
+  m = /^\/trip\/([a-z0-9]{6,32})\/recover$/.exec(p)
+  if (m) return { name: 'recover', slug: m[1] }
   m = /^\/trip\/([a-z0-9]{6,32})$/.exec(p)
   if (m) return { name: 'trip', slug: m[1] }
   return { name: 'notfound' }

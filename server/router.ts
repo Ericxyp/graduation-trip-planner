@@ -3,7 +3,20 @@
  * Vercel Functions（api/[...route].ts 等）与测试都直接调用 handleApi，不依赖 Express。
  */
 import type { ZodType } from 'zod'
-import { createTripSchema, joinTripSchema, lockSchema, preferencesSchema, statePatchSchema } from '../src/shared/schemas.js'
+import {
+  createTripSchema,
+  expenseCreateSchema,
+  expenseDeleteSchema,
+  expenseUpdateSchema,
+  inviteSchema,
+  joinTripSchema,
+  leaveSchema,
+  lockSchema,
+  preferencesSchema,
+  recoverSchema,
+  statePatchSchema,
+  transferSchema,
+} from '../src/shared/schemas.js'
 import type { ApiErrorBody, HealthView } from '../src/shared/types.js'
 import type { ServerConfig } from './config.js'
 import { pgCode, type Db } from './db.js'
@@ -29,7 +42,7 @@ export function json(status: number, body: unknown, extra: Record<string, string
 
 function errorResponse(e: ApiError): Response {
   const body: ApiErrorBody = { error: { code: e.code, message: e.message } }
-  return json(e.status, body, e.code === 'RATE_LIMITED' ? { 'retry-after': '60' } : {})
+  return json(e.status, body, e.code === 'RATE_LIMITED' ? { 'retry-after': String(e.retryAfter ?? 60) } : {})
 }
 
 async function readJson<T>(req: Request, schema: ZodType<T>): Promise<T> {
@@ -52,6 +65,13 @@ async function readJson<T>(req: Request, schema: ZodType<T>): Promise<T> {
     throw new ApiError('INVALID_INPUT', `${field}：${issue?.message ?? '格式不正确'}`)
   }
   return parsed.data
+}
+
+/** 允许空请求体（例如退出）；有内容时按同样规则校验 */
+async function readOptionalJson<T>(req: Request, schema: ZodType<T>): Promise<T | null> {
+  const len = Number(req.headers.get('content-length') ?? '0')
+  if (!req.headers.get('content-type') && !len) return null
+  return readJson(req, schema)
 }
 
 function bearer(req: Request): string | null {
@@ -103,15 +123,18 @@ export async function handleApi(req: Request, deps: ApiDeps): Promise<Response> 
 
     if (!deps.config.databaseUrl) throw new ApiError('NOT_CONFIGURED', '云端功能尚未配置')
     const origin = deps.config.appOrigin ?? new URL(req.url).origin
-    const service = createService({ repo: createRepo(deps.db(deps.config.databaseUrl)), pepper: deps.config.tokenPepper, appOrigin: origin })
-    const token = bearer(req)
     const ip = clientIp(req)
+    const db = deps.db(deps.config.databaseUrl)
+    const service = createService({ repo: createRepo(db), db, pepper: deps.config.tokenPepper, appOrigin: origin, clientIp: ip })
+    const token = bearer(req)
     const [, , slug, sub, subId, subExtra] = parts
+    const isUuid = (v: string | undefined) => !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
 
     // POST /api/trips
     if (!slug) {
       if (method !== 'POST') throw new ApiError('METHOD_NOT_ALLOWED', '不支持的请求方法')
-      if (hitRateLimit(`create:${ip}`, 10, 10 * 60_000)) throw new ApiError('RATE_LIMITED', '创建太频繁，请稍后再试')
+      // 进程内预过滤（挡住单实例洪泛，减轻数据库压力）；权威限流在数据库中（server/limits.ts）
+      if (hitRateLimit(`create:${ip}`, 30, 10 * 60_000)) throw new ApiError('RATE_LIMITED', '创建太频繁，请稍后再试')
       const body = await readJson(req, createTripSchema)
       return json(201, await service.createTrip(body))
     }
@@ -123,7 +146,7 @@ export async function handleApi(req: Request, deps: ApiDeps): Promise<Response> 
       case route === 'GET ':
         return json(200, await service.getTrip(slug, token))
       case route === 'POST join': {
-        if (hitRateLimit(`join:${ip}`, 20, 10 * 60_000) || hitRateLimit(`join-trip:${slug}`, 60, 10 * 60_000)) throw new ApiError('RATE_LIMITED', '尝试次数过多，请稍后再试')
+        if (hitRateLimit(`join:${ip}`, 60, 10 * 60_000)) throw new ApiError('RATE_LIMITED', '尝试次数过多，请稍后再试')
         const body = await readJson(req, joinTripSchema)
         return json(201, await service.join(slug, body))
       }
@@ -142,8 +165,45 @@ export async function handleApi(req: Request, deps: ApiDeps): Promise<Response> 
         return json(200, await service.lock(slug, token, body))
       }
       case method === 'DELETE' && sub === 'members' && !!subId && !subExtra: {
-        if (!/^[0-9a-f-]{36}$/i.test(subId)) throw new ApiError('MEMBER_NOT_FOUND', '成员不存在')
+        if (!isUuid(subId)) throw new ApiError('MEMBER_NOT_FOUND', '成员不存在')
         return json(200, await service.removeMember(slug, token, subId))
+      }
+      /* ---------- 阶段三 ---------- */
+      case route === 'POST leave': {
+        await readOptionalJson(req, leaveSchema)
+        return json(200, await service.leave(slug, token))
+      }
+      case route === 'POST transfer-organizer': {
+        const body = await readJson(req, transferSchema)
+        return json(200, await service.transferOrganizer(slug, token, body.memberId))
+      }
+      case route === 'POST archive':
+        return json(200, await service.archive(slug, token))
+      case route === 'POST recover-organizer': {
+        if (hitRateLimit(`recover:${ip}`, 30, 15 * 60_000)) throw new ApiError('RATE_LIMITED', '恢复尝试次数过多，请稍后再试')
+        const body = await readJson(req, recoverSchema)
+        return json(200, await service.recoverOrganizer(slug, body))
+      }
+      case route === 'POST recovery-code':
+        return json(200, await service.resetRecoveryCode(slug, token))
+      case route === 'PATCH invite': {
+        const body = await readJson(req, inviteSchema)
+        return json(200, await service.updateInvite(slug, token, body))
+      }
+      case route === 'GET expenses':
+        return json(200, (await service.getTrip(slug, token)).ledger)
+      case route === 'POST expenses': {
+        const body = await readJson(req, expenseCreateSchema)
+        return json(201, await service.createExpense(slug, token, body))
+      }
+      case (method === 'PATCH' || method === 'DELETE') && sub === 'expenses' && !!subId && !subExtra: {
+        if (!isUuid(subId)) throw new ApiError('EXPENSE_NOT_FOUND', '费用不存在或已删除')
+        if (method === 'PATCH') {
+          const body = await readJson(req, expenseUpdateSchema)
+          return json(200, await service.updateExpense(slug, token, subId, body))
+        }
+        const body = await readJson(req, expenseDeleteSchema)
+        return json(200, await service.deleteExpense(slug, token, subId, body.expectedVersion))
       }
       default:
         throw new ApiError('NOT_FOUND', '接口不存在')

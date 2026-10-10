@@ -4,6 +4,7 @@
 import { z } from 'zod'
 import { isIsoDate, rangeDays } from './dates.js'
 import { BUDGET_IDS, MUST_OPTIONS, NO_OPTIONS } from './options.js'
+import { EXPENSE_CATEGORY_IDS, MAX_EXPENSE_CENTS } from './ledger.js'
 
 const text = (min: number, max: number) =>
   z
@@ -71,3 +72,54 @@ export type JoinTripBody = z.infer<typeof joinTripSchema>
 export type PreferencesBody = z.infer<typeof preferencesSchema>
 export type LockBody = z.infer<typeof lockSchema>
 export type StatePatchBody = z.infer<typeof statePatchSchema>
+
+/* ---------------- 阶段三 ---------------- */
+
+const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'ID 格式不正确')
+const cents = z.number().int('金额必须是整数分').min(1).max(MAX_EXPENSE_CENTS)
+
+export const leaveSchema = z.object({}).strict()
+
+export const recoverSchema = z
+  .object({
+    recoveryCode: z
+      .string()
+      .transform((s) => s.replace(/[\s-]/g, '').toUpperCase())
+      .pipe(z.string().regex(/^[A-Z0-9]{16}$/, '恢复码格式不正确')),
+  })
+  .strict()
+
+export const transferSchema = z.object({ memberId: uuid }).strict()
+
+export const inviteSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('regenerate'), expectedInviteVersion: z.number().int().min(0) }).strict(),
+  z.object({ action: z.literal('pause'), expectedInviteVersion: z.number().int().min(0) }).strict(),
+  z.object({ action: z.literal('resume'), expectedInviteVersion: z.number().int().min(0) }).strict(),
+  z.object({ action: z.literal('deadline'), inviteDeadline: z.string().datetime({ offset: true }).nullable(), expectedInviteVersion: z.number().int().min(0) }).strict(),
+])
+
+const expenseBase = {
+  title: text(1, 40),
+  category: z.enum(EXPENSE_CATEGORY_IDS),
+  amountCents: cents,
+  paidBy: uuid,
+}
+const splitSchema = z.discriminatedUnion('splitMethod', [
+  z.object({ splitMethod: z.literal('equal_all') }).strict(),
+  z.object({ splitMethod: z.literal('equal_selected'), memberIds: z.array(uuid).min(1).max(30) }).strict(),
+  z
+    .object({
+      splitMethod: z.literal('custom'),
+      shares: z.array(z.object({ memberId: uuid, shareCents: z.number().int().min(0).max(MAX_EXPENSE_CENTS) }).strict()).min(1).max(30),
+    })
+    .strict(),
+])
+
+export const expenseCreateSchema = z.object({ ...expenseBase, split: splitSchema }).strict()
+export const expenseUpdateSchema = z.object({ ...expenseBase, split: splitSchema, expectedVersion: z.number().int().min(0) }).strict()
+export const expenseDeleteSchema = z.object({ expectedVersion: z.number().int().min(0) }).strict()
+
+export type InviteBody = z.infer<typeof inviteSchema>
+export type ExpenseCreateBody = z.infer<typeof expenseCreateSchema>
+export type ExpenseUpdateBody = z.infer<typeof expenseUpdateSchema>
+export type RecoverBody = z.infer<typeof recoverSchema>

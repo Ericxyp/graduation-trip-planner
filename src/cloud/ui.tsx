@@ -77,17 +77,19 @@ export function StateCard({ icon = 'alert', title, desc, children }: { icon?: 'a
   )
 }
 
-export type SyncStatus = 'loading' | 'synced' | 'syncing' | 'error' | 'snapshot'
+export type SyncStatus = 'loading' | 'synced' | 'syncing' | 'error' | 'snapshot' | 'offline'
 
 export function SyncPill({ status, lastSynced, onRetry }: { status: SyncStatus; lastSynced: Date | null; onRetry: () => void }) {
   const time = lastSynced ? lastSynced.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
-  if (status === 'error' || status === 'snapshot')
+  if (status === 'error' || status === 'snapshot' || status === 'offline') {
+    const label = status === 'snapshot' ? '本地只读快照' : status === 'offline' ? '网络断开' : '同步失败'
     return (
-      <button onClick={onRetry} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-coral-50 px-3 text-xs font-semibold text-coral-700 ring-1 ring-coral-200 hover:bg-coral-100" aria-label="同步失败，点击重试">
+      <button onClick={onRetry} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-coral-50 px-3 text-xs font-semibold text-coral-700 ring-1 ring-coral-200 hover:bg-coral-100" aria-label={`${label}，点击重试`}>
         <CloudOff className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">{status === 'snapshot' ? '离线快照' : '同步失败'} · </span>重试
+        <span className="hidden sm:inline">{label} · </span>重试
       </button>
     )
+  }
   return (
     <span className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-white px-3 text-xs font-medium text-ink-500 ring-1 ring-ink-800/10" role="status" aria-live="polite">
       {status === 'synced' ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : status === 'syncing' ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-500" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
